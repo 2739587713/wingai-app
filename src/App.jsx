@@ -136,8 +136,6 @@ export default function App(){
   const [fp,setFp]=useState("全部");
   const [aiTemplates,setAiTemplates]=useState(()=>{try{const raw=JSON.parse(localStorage.getItem("aiTmpls")||"[]");return raw.flatMap(x=>x.templates?x.templates.map(t=>({_creator:x.name||x._creator,...t})):[x]);}catch{return [];}});
   const [libSelTmpl,setLibSelTmpl]=useState(null);
-  const [showImport,setShowImport]=useState(false);
-  const [importTxt,setImportTxt]=useState("");
   const [delMode,setDelMode]=useState(false);
   const [delSel,setDelSel]=useState([]);
   const [showExtract,setShowExtract]=useState(false);
@@ -1152,8 +1150,9 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
 .it-tip-ic{width:28px;height:28px;border-radius:7px;background:var(--pbg);color:var(--p);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px}
 .it-tip-t{font-size:11px;font-weight:600;color:var(--t2);margin-bottom:2px}
 .it-tip-d{font-size:10px;color:var(--t3);line-height:1.5}
-.it-right{flex:1;background:var(--s2);display:flex;align-items:center;justify-content:center;padding:32px}
-.it-preview{width:100%;max-width:400px;background:var(--s);border-radius:16px;border:1px solid var(--bl);min-height:480px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.04)}
+.it-right{flex:1;background:var(--s2);display:flex;align-items:flex-start;justify-content:center;padding:32px;overflow-y:auto}
+.it-right::-webkit-scrollbar{width:4px}.it-right::-webkit-scrollbar-thumb{background:var(--b);border-radius:2px}
+.it-preview{width:100%;max-width:400px;background:var(--s);border-radius:16px;border:1px solid var(--bl);min-height:480px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.04);margin-top:auto;margin-bottom:auto}
 .it-pv-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;text-align:center}
 .it-pv-ic{width:56px;height:56px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;margin-bottom:14px;font-size:22px}
 .it-pv-t{font-size:14px;font-weight:700;color:var(--t2);margin-bottom:4px}
@@ -1570,7 +1569,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
           {/* Right - preview */}
           <div className="it-right">
             {itPlat==="小红书"&&xhsNotes.length>0?
-            <div style={{width:"100%",maxWidth:520,maxHeight:"calc(100vh - 84px)",overflow:"auto",display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{width:"100%",maxWidth:520,display:"flex",flexDirection:"column",gap:14,paddingBottom:24}}>
               <div className="xhs-tabs">
                 {xhsNotes.map((n,i)=>(
                   <button key={i} className={`xhs-tab ${xhsSel===i?"on":""}`} onClick={()=>setXhsSel(i)}>
@@ -1988,7 +1987,6 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
             {tTab==="AI提炼"&&<div style={{display:"flex",gap:8}}>
               {aiTemplates.length>0&&!delMode&&<button style={{padding:"6px 14px",border:"1.5px solid #F87171",borderRadius:8,background:"#FFF5F5",color:"#EF4444",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{setDelMode(true);setDelSel([])}}>删除模板</button>}
               {!delMode&&<button style={{padding:"6px 14px",border:"1.5px solid #3B82F6",borderRadius:8,background:"#EFF6FF",color:"#3B82F6",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:4}} onClick={()=>{setShowExtract(true);setExtStep("");setExtLink("");setExtName("");setExtCat("");}}><I.Link/> 提取模板</button>}
-              {!delMode&&<button style={{padding:"6px 14px",border:"1.5px solid var(--p)",borderRadius:8,background:"var(--pbg)",color:"var(--p)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:4}} onClick={()=>setShowImport(true)}><I.Plus/> 导入模板</button>}
               {delMode&&<button style={{padding:"6px 14px",border:"1.5px solid var(--bl)",borderRadius:8,background:"var(--s)",color:"var(--t2)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{setDelMode(false);setDelSel([])}}>取消</button>}
             </div>}
           </div>
@@ -2001,7 +1999,6 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
               <div style={{marginBottom:16}}>粘贴博主抖音链接，一键提取风格模板</div>
               <div style={{display:"flex",gap:8,justifyContent:"center"}}>
                 <button style={{padding:"8px 20px",border:"none",borderRadius:10,background:"#3B82F6",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{setShowExtract(true);setExtStep("");setExtLink("");setExtName("");setExtCat("");}}>提取博主模板</button>
-                <button style={{padding:"8px 20px",border:"1.5px solid var(--bl)",borderRadius:10,background:"var(--s)",color:"var(--t2)",fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setShowImport(true)}>导入JSON</button>
               </div>
             </div>:<>
               <div className="tg2">{aiTemplates.map((t,i)=>{const checked=delSel.includes(i);return(
@@ -2020,33 +2017,6 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
               </div>}
             </>}
           </div>}
-        </div>}
-        {showImport&&<div className="sb-ov" onClick={e=>{if(e.target===e.currentTarget)setShowImport(false)}}>
-          <div style={{background:"var(--s)",borderRadius:18,padding:28,width:480,boxShadow:"0 8px 40px rgba(0,0,0,.12)"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-              <div style={{fontSize:15,fontWeight:700}}>导入AI提炼模板</div>
-              <button style={{border:"none",background:"none",cursor:"pointer",color:"var(--t2)"}} onClick={()=>setShowImport(false)}><I.X/></button>
-            </div>
-            <div style={{fontSize:12,color:"var(--t3)",marginBottom:10,lineHeight:1.6}}>
-              运行 <code style={{background:"var(--s3)",padding:"1px 6px",borderRadius:4,fontFamily:"monospace"}}>python douyin_template.py</code> → 选择「查看模板」→ 复制JSON内容粘贴到下方
-            </div>
-            <textarea style={{width:"100%",height:180,border:"1.5px solid var(--bl)",borderRadius:10,padding:12,fontSize:12,fontFamily:"monospace",resize:"vertical",boxSizing:"border-box",outline:"none"}}
-              placeholder={'粘贴 templates.json 的内容，格式如：{"李佳琦": {"templates": [...], ...}}'}
-              value={importTxt} onChange={e=>setImportTxt(e.target.value)}/>
-            <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:12}}>
-              <button style={{padding:"8px 18px",border:"1.5px solid var(--bl)",borderRadius:10,background:"var(--s)",color:"var(--t2)",fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>setShowImport(false)}>取消</button>
-              <button style={{padding:"8px 18px",border:"none",borderRadius:10,background:"var(--p)",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{
-                try{
-                  const raw=JSON.parse(importTxt);
-                  const arr=Object.entries(raw).flatMap(([creatorName,data])=>(data.templates||[]).map(t=>({_creator:creatorName,...t})));
-                  const merged=[...aiTemplates,...arr.filter(a=>!aiTemplates.find(x=>x._creator===a._creator&&x.name===a.name))];
-                  setAiTemplates(merged);
-                  localStorage.setItem("aiTmpls",JSON.stringify(merged));
-                  setShowImport(false);setImportTxt("");setTTab("AI提炼");
-                }catch{alert("JSON格式有误，请检查后重试");}
-              }}>确认导入</button>
-            </div>
-          </div>
         </div>}
         {showExtract&&<div className="sb-ov" onClick={e=>{if(e.target===e.currentTarget&&!extBusy){setShowExtract(false);setExtStep("");setExtStepIdx(-1);}}}>
           <div style={{background:"var(--s)",borderRadius:18,padding:28,width:520,boxShadow:"0 8px 40px rgba(0,0,0,.12)"}}>
