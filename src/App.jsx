@@ -271,7 +271,7 @@ export default function App(){
       let videoIds=[];let cursor=0;
       for(const ep of["/api/v1/douyin/web/fetch_user_post_videos","/api/v1/douyin/app/v3/fetch_user_post_videos"]){
         videoIds=[];cursor=0;
-        while(videoIds.length<30){const d=await thGet(ep,{sec_user_id:secUid,count:Math.min(20,30-videoIds.length),max_cursor:cursor});if(!d)break;const items=(d.data||{}).aweme_list||[];if(!items.length)break;for(const it of items){const aid=it.aweme_id||it.video?.vid||"";if(aid)videoIds.push({id:String(aid),title:(it.desc||"").trim(),digg:(it.statistics||{}).digg_count||0,comment:(it.statistics||{}).comment_count||0,share:(it.statistics||{}).share_count||0});}setExtInfo("已获取 "+videoIds.length+" 条...");if(!d.data?.has_more)break;cursor=d.data?.max_cursor||0;await new Promise(r=>setTimeout(r,800));}
+        while(videoIds.length<50){const d=await thGet(ep,{sec_user_id:secUid,count:Math.min(20,50-videoIds.length),max_cursor:cursor});if(!d)break;const items=(d.data||{}).aweme_list||[];if(!items.length)break;for(const it of items){const aid=it.aweme_id||it.video?.vid||"";if(aid)videoIds.push({id:String(aid),title:(it.desc||"").trim(),digg:(it.statistics||{}).digg_count||0,comment:(it.statistics||{}).comment_count||0,share:(it.statistics||{}).share_count||0});}setExtInfo("已获取 "+videoIds.length+" 条...");if(!d.data?.has_more)break;cursor=d.data?.max_cursor||0;await new Promise(r=>setTimeout(r,800));}
         if(videoIds.length)break;await new Promise(r=>setTimeout(r,1500));
       }
       if(!videoIds.length){setExtStep("err:未获取到视频，请检查链接或稍后重试");setExtBusy(false);return;}
@@ -1834,11 +1834,19 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
               <div style={{fontSize:15,fontWeight:700}}>提取博主模板</div>
               {!extBusy&&<button style={{border:"none",background:"none",cursor:"pointer",color:"var(--t2)"}} onClick={()=>{setShowExtract(false);setExtStep("");setExtStepIdx(-1);}}><I.X/></button>}
             </div>
-            <div style={{fontSize:12,color:"var(--t3)",marginBottom:14,lineHeight:1.6}}>粘贴博主的抖音主页链接，AI将自动分析其视频数据并提炼出风格模板</div>
+            <div style={{background:"linear-gradient(135deg,#EFF6FF,#F0F9FF)",borderRadius:12,padding:"14px 16px",marginBottom:16,border:"1px solid #BFDBFE"}}>
+              <div style={{fontSize:12,fontWeight:600,color:"#1E40AF",marginBottom:10}}>获取链接只需三步</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {[{t:(<>打开抖音 App，找到你喜欢的博主主页</>)},{t:(<>点击主页右上角 <svg width="14" height="14" viewBox="0 0 24 24" style={{verticalAlign:"-2px",margin:"0 1px"}}><circle cx="12" cy="12" r="11" fill="none" stroke="#334155" strokeWidth="1.8"/><circle cx="7" cy="12" r="1.5" fill="#334155"/><circle cx="12" cy="12" r="1.5" fill="#334155"/><circle cx="17" cy="12" r="1.5" fill="#334155"/></svg> 选择「分享名片」再点「复制链接」</>)},{t:(<>回到这里，直接粘贴即可（包含文字也没关系）</>)}].map((s,i)=><div key={i} style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                  <div style={{width:22,height:22,borderRadius:"50%",background:"#fff",border:"1.5px solid #93C5FD",color:"#3B82F6",fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>{i+1}</div>
+                  <div style={{fontSize:12,color:"#334155",lineHeight:1.6}}>{s.t}</div>
+                </div>)}
+              </div>
+            </div>
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               <div>
                 <div style={{fontSize:12,fontWeight:600,marginBottom:4,color:"var(--t1)"}}>博主链接 <span style={{color:"#EF4444"}}>*</span></div>
-                <input style={{width:"100%",padding:"10px 12px",border:"1.5px solid var(--bl)",borderRadius:10,fontSize:12,outline:"none",boxSizing:"border-box",fontFamily:"inherit"}} placeholder="粘贴抖音博主主页链接或分享文字" value={extLink} onChange={e=>setExtLink(e.target.value)} disabled={extBusy}/>
+                <input style={{width:"100%",padding:"10px 12px",border:"1.5px solid var(--bl)",borderRadius:10,fontSize:12,outline:"none",boxSizing:"border-box",fontFamily:"inherit"}} placeholder="直接粘贴复制的内容，如：7- 长按复制... https://v.douyin.com/xxx" value={extLink} onChange={e=>setExtLink(e.target.value)} disabled={extBusy}/>
               </div>
               <div style={{display:"flex",gap:10}}>
                 <div style={{flex:1}}>
@@ -1851,25 +1859,24 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                 </div>
               </div>
             </div>
-            {extStepIdx>=0&&<div style={{marginTop:16,padding:"14px 16px",borderRadius:12,background:extStep.startsWith("err:")?"#FEF2F2":"#F8FAFC",border:"1px solid",borderColor:extStep.startsWith("err:")?"#FECACA":"#E2E8F0"}}>
-              <div style={{display:"flex",gap:0,marginBottom:extInfo||extStep.startsWith("err:")?10:0}}>
-                {extSteps.map((s,i)=>{const done=i<extStepIdx;const active=i===extStepIdx&&!extStep.startsWith("err:");const last=i===extSteps.length-1;return(<div key={i} style={{display:"flex",alignItems:"center",flex:last?0:1}}>
-                  <div style={{width:22,height:22,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,flexShrink:0,background:done?"#3B82F6":active?"#fff":extStepIdx===4&&i===4?"#10B981":"#F1F5F9",color:done||extStepIdx===4&&i===4?"#fff":active?"#3B82F6":"#94A3B8",border:active?"2px solid #3B82F6":"2px solid transparent",transition:"all .3s",position:"relative"}}>
-                    {done?<I.Check/>:extStepIdx===4&&i===4?<I.Check/>:i+1}
-                    {active&&extBusy&&<span style={{position:"absolute",inset:-4,borderRadius:"50%",border:"2px solid transparent",borderTopColor:"#3B82F6",animation:"spin 1s linear infinite"}}/>}
-                  </div>
-                  {!last&&<div style={{flex:1,height:2,margin:"0 4px",background:done?"#3B82F6":"#E2E8F0",transition:"background .3s",borderRadius:1}}/>}
-                </div>);})}
+            {extStepIdx>=0&&<div style={{marginTop:16,borderRadius:12,overflow:"hidden",border:"1px solid",borderColor:extStep.startsWith("err:")?"#FECACA":extStepIdx===4?"#BBF7D0":"#E2E8F0"}}>
+              <div style={{background:extStep.startsWith("err:")?"#FEF2F2":extStepIdx===4?"#F0FDF4":"#F8FAFC",padding:"12px 16px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  {extBusy&&<span style={{display:"inline-block",width:16,height:16,border:"2.5px solid #DBEAFE",borderTopColor:"#3B82F6",borderRadius:"50%",animation:"spin .8s linear infinite",flexShrink:0}}/>}
+                  {extStepIdx===4&&<div style={{width:16,height:16,borderRadius:"50%",background:"#10B981",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><I.Check/></div>}
+                  {extStep.startsWith("err:")&&<div style={{width:16,height:16,borderRadius:"50%",background:"#EF4444",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,color:"#fff",fontSize:11,fontWeight:700}}>!</div>}
+                  <span style={{fontSize:12,fontWeight:600,color:extStep.startsWith("err:")?"#DC2626":extStepIdx===4?"#16A34A":"#1E40AF"}}>{extStep.startsWith("err:")?"提取遇到问题":extStepIdx===4?"提取完成":extSteps[extStepIdx]+"..."}</span>
+                </div>
+                {!extStep.startsWith("err:")&&extStepIdx<5&&<div style={{background:"#E2E8F0",borderRadius:99,height:6,overflow:"hidden"}}>
+                  <div style={{height:"100%",borderRadius:99,background:extStepIdx===4?"#10B981":"linear-gradient(90deg,#3B82F6,#6366F1)",transition:"width .5s ease",width:extStepIdx===4?"100%":(extStepIdx*25+12)+"%"}}/>
+                </div>}
+                {!extStep.startsWith("err:")&&extStepIdx<4&&<div style={{display:"flex",justifyContent:"space-between",marginTop:6}}>
+                  {extSteps.slice(0,4).map((s,i)=><span key={i} style={{fontSize:9,color:i<=extStepIdx?"#3B82F6":"#94A3B8",fontWeight:i===extStepIdx?600:400,transition:"all .3s"}}>{s}</span>)}
+                </div>}
+                {extInfo&&!extStep.startsWith("err:")&&extStepIdx<4&&<div style={{marginTop:6,fontSize:11,color:"#64748B"}}>{extInfo}</div>}
+                {extStepIdx===4&&<div style={{marginTop:4,fontSize:11,color:"#16A34A"}}>{extInfo}</div>}
               </div>
-              {extStepIdx>=0&&extStepIdx<5&&!extStep.startsWith("err:")&&<div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"#94A3B8",marginTop:4}}>
-                {extSteps.map((s,i)=><span key={i} style={{color:i===extStepIdx?"#3B82F6":i<extStepIdx?"#64748B":"#CBD5E1",fontWeight:i===extStepIdx?600:400,transition:"all .3s",textAlign:"center",flex:1}}>{s}</span>)}
-              </div>}
-              {extInfo&&!extStep.startsWith("err:")&&<div style={{marginTop:8,fontSize:11,color:"#64748B",display:"flex",alignItems:"center",gap:6}}>
-                {extBusy&&<span style={{display:"inline-block",width:12,height:12,border:"2px solid #93C5FD",borderTopColor:"#3B82F6",borderRadius:"50%",animation:"spin 1s linear infinite",flexShrink:0}}/>}
-                {extInfo}
-              </div>}
-              {extStep.startsWith("err:")&&<div style={{fontSize:11,color:"#DC2626",whiteSpace:"pre-wrap",lineHeight:1.6}}>{extStep.slice(4)}</div>}
-              {extStepIdx===4&&<div style={{fontSize:12,color:"#10B981",fontWeight:600,display:"flex",alignItems:"center",gap:6,marginTop:4}}>{extInfo}</div>}
+              {extStep.startsWith("err:")&&<div style={{padding:"10px 16px",background:"#fff",borderTop:"1px solid #FECACA",fontSize:10,color:"#92400E",whiteSpace:"pre-wrap",lineHeight:1.6,maxHeight:120,overflow:"auto"}}>{extStep.slice(4)}</div>}
             </div>}
             <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:14}}>
               {!extBusy&&extStepIdx!==4&&<button style={{padding:"8px 18px",border:"1.5px solid var(--bl)",borderRadius:10,background:"var(--s)",color:"var(--t2)",fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{setShowExtract(false);setExtStep("");setExtStepIdx(-1);}}>取消</button>}
