@@ -182,6 +182,32 @@ export default function App(){
   const [xhsNotes,setXhsNotes]=useState([]);
   const [xhsSel,setXhsSel]=useState(0);
   const [xhsEditIdx,setXhsEditIdx]=useState(-1);
+  // douyin generator
+  const [dyProd,setDyProd]=useState("");
+  const [dyAudience,setDyAudience]=useState("");
+  const [dySelling,setDySelling]=useState("");
+  const [dyBusy,setDyBusy]=useState(false);
+  const [dyPhase,setDyPhase]=useState(""); // ""→search→analyzed→generate→done
+  const [dyAnalysis,setDyAnalysis]=useState(null);
+  const [dyAnalysisText,setDyAnalysisText]=useState("");
+  const [dyRecStyles,setDyRecStyles]=useState([]);
+  const [dySelStyles,setDySelStyles]=useState([]);
+  const [dyNotes,setDyNotes]=useState([]);
+  const [dySel,setDySel]=useState(0);
+  const [dyEditIdx,setDyEditIdx]=useState(-1);
+  // wechat generator
+  const [wxProd,setWxProd]=useState("");
+  const [wxAudience,setWxAudience]=useState("");
+  const [wxSelling,setWxSelling]=useState("");
+  const [wxBusy,setWxBusy]=useState(false);
+  const [wxPhase,setWxPhase]=useState(""); // ""→search→analyzed→generate→done
+  const [wxAnalysis,setWxAnalysis]=useState(null);
+  const [wxAnalysisText,setWxAnalysisText]=useState("");
+  const [wxRecStyles,setWxRecStyles]=useState([]);
+  const [wxSelStyles,setWxSelStyles]=useState([]);
+  const [wxArticles,setWxArticles]=useState([]);
+  const [wxSel,setWxSel]=useState(0);
+  const [wxEditIdx,setWxEditIdx]=useState(-1);
   // schedule page
   const [schMonth,setSchMonth]=useState(new Date().getMonth());
   const [schYear,setSchYear]=useState(new Date().getFullYear());
@@ -520,6 +546,384 @@ ${styleList}
       setXhsBusy(false);
     }
   };
+  // ====== 抖音图文：第一步 搜索+拆解 ======
+  const searchDy=async()=>{
+    if(!dyProd.trim()){alert("请填写产品/服务名称");return;}
+    setDyBusy(true);setDyNotes([]);setDySel(0);setDyAnalysis(null);setDyAnalysisText("");setDyRecStyles([]);setDySelStyles([]);setDyPhase("search");
+
+    const searchPrompt=`你是一位顶级抖音图文内容策略师，擅长从真实爆款图文笔记中提炼可复用的内容模式和流量密码。
+
+注意：抖音图文是抖音平台上的图片+文字形式的内容（类似小红书笔记的轮播图文，但在抖音生态内分发），不是短视频。
+
+现在有一个客户需要在抖音上用图文形式推广，以下是他的信息：
+- 产品/服务：${dyProd}
+${dyAudience?"- 目标受众："+dyAudience:""}
+${dySelling?"- 核心卖点："+dySelling:""}
+
+请你完成以下任务：
+
+【第一步：智能选词】
+根据客户的产品信息，自主推导出5-8个最有效的抖音图文搜索关键词。要覆盖：
+- 产品/服务的直接关键词（如"祛痘产品"）
+- 所属行业/品类词（如"护肤好物推荐"）
+- 目标受众的需求词、痛点词（如"油皮痘肌怎么办"）
+- 抖音热门话题词（如"好物分享""抖音图文"）
+- 场景词/情绪词（如"学生党必备""平价好物"）
+不需要客户提供，你自己判断。
+
+【第二步：联网搜索爆款图文】
+用上面推导出的关键词，联网搜索抖音上的真实爆款图文笔记。重点筛选符合以下"爆款"标准的图文：
+
+📊 爆款判定标准（满足任意2条即算爆款）：
+① 低粉爆文：作者粉丝<5万，但单篇点赞≥5000或收藏≥3000——纯靠内容质量起量
+② 高收藏率：收藏数 ≥ 点赞数×40%——说明图文有干货价值，用户愿意存下来
+③ 高互动率：评论数 ≥ 点赞数×5%——说明内容引发了真实讨论
+④ 高分享率：分享数 ≥ 点赞数×8%——说明有社交传播价值
+⑤ 万赞级爆文：点赞≥1万——绝对数量级的图文爆款
+⑥ 时效爆款：最近3个月内发布且点赞≥2000、收藏≥1000——当前算法偏好
+⑦ 垂直领域头部：在该细分品类下排名前列的图文笔记
+
+🔍 额外关注：
+- 同一个作者多篇爆款图文，重点分析——说明其方法论可复用
+- 关注图文的封面图设计规律（文字排版、配色、构图）
+- 注意区分"投流假爆款"和"自然流量真爆款"，优先真爆款
+- 抖音图文和小红书图文的差异点（抖音更注重封面吸引力、文案简短有力、标签SEO）
+
+请尽量找到8-15篇符合条件的爆款图文。
+
+【第三步：深度拆解】
+对找到的爆款图文逐一拆解，综合提炼共性规律：
+
+1. 标题公式：提取可直接套用的标题模板（抖音图文标题更短更冲击）
+2. 开头Hook：前两句抓注意力的手法（痛点/数据/反常识/提问/场景代入）
+3. 内容结构：正文组织方式（列表干货/对比/步骤教程/故事线/问答）
+4. 图片策略：封面图设计规律、图片张数、图文配合方式
+5. 信任建立：数据、案例、对比图、用户反馈、专业背书
+6. 转化设计：引导关注/评论/私信的CTA位置和写法
+7. 语气风格：用词习惯、emoji风格、人设调性
+8. 标签策略：高频出现的话题标签（抖音图文SEO标签很重要）
+
+【第四步：推荐创作风格】
+根据拆解结果，推荐3-5种最适合该产品的抖音图文风格。从以下风格库中选择并排序：
+- 干货教程：步骤清晰的教学图文，适合知识型/工具类产品
+- 产品种草：直接安利推荐，适合消费品/好物推荐
+- 对比测评：使用前后/产品横评，适合竞争品类
+- 避坑指南：踩坑经验/注意事项，适合决策成本高的品类
+- 清单合集：好物清单/推荐列表，适合多SKU产品
+- 经验分享：个人真实体验，适合个人IP/体验型产品
+- 热点蹭流：结合热点话题植入产品，适合快消品/话题品
+- 痛点解决：直击痛点给方案，适合刚需产品/服务
+
+每个推荐风格要说明：为什么适合、在爆款中的占比、预期效果。
+
+请用JSON格式返回，不要有JSON之外的文字：
+{
+  "search_keywords":["搜索关键词1","关键词2","关键词3"],
+  "searched_notes":[
+    {"title":"图文标题","author":"作者","followers":"粉丝数","likes":"点赞数","collects":"收藏数","comments":"评论数","shares":"分享数","img_count":"图片张数","why_viral":"命中了哪条爆款标准","is_ad":false,"summary":"内容摘要（80字）"}
+  ],
+  "title_formulas":[
+    {"formula":"可复用的标题公式","example":"具体示例","why":"为什么有效","used_count":"多少篇爆款用了类似公式"}
+  ],
+  "opening_hooks":[
+    {"type":"hook类型","template":"可复用模板","example":"真实爆款开头原文"}
+  ],
+  "winning_structures":[
+    {"name":"结构名称","outline":["段落1功能","段落2","段落3","段落4","段落5"],"description":"为什么有效","frequency":"在爆款中出现的频率"}
+  ],
+  "image_tactics":["封面图设计规律1","规律2","规律3"],
+  "trust_tactics":["策略1","策略2","策略3","策略4"],
+  "conversion_tactics":[
+    {"tactic":"转化策略","example":"真实CTA文案","position":"位置"}
+  ],
+  "tone_style":"综合语气风格（100字，涵盖人设/用词/emoji）",
+  "hot_hashtags":["#标签1","#标签2","#标签3","#标签4","#标签5","#标签6","#标签7","#标签8"],
+  "key_insights":["关键洞察1","洞察2","洞察3"],
+  "do_list":["创作必做1","2","3","4","5"],
+  "dont_list":["创作禁忌1","2","3"],
+  "recommended_styles":[
+    {"style":"风格名称","reason":"为什么适合这个产品（30字）","match":"高/中/低","frequency":"在爆款中占比如 40%"}
+  ]
+}`;
+
+    try{
+      console.log("[DY] Step 1: Qwen searching for",dyProd);
+      const searchRaw=await callQwen(searchPrompt);
+      console.log("[DY] Qwen raw length:",searchRaw.length);
+
+      let analysisData=null;
+      const jm=searchRaw.match(/\{[\s\S]*\}/);
+      if(jm){try{analysisData=JSON.parse(jm[0]);}catch(e){console.log("[DY] JSON parse err");}}
+      const aText=analysisData?JSON.stringify(analysisData,null,2):searchRaw;
+      setDyAnalysis(analysisData||{raw:searchRaw});
+      setDyAnalysisText(aText);
+
+      const rec=analysisData?.recommended_styles||[];
+      setDyRecStyles(rec);
+      setDySelStyles(rec.slice(0,3).map(r=>r.style));
+      setDyPhase("analyzed");
+    }catch(e){
+      console.error("[DY] search error:",e);
+      alert("搜索失败："+e.message);
+      setDyPhase("");
+    }finally{
+      setDyBusy(false);
+    }
+  };
+
+  // ====== 抖音图文：第二步 生成笔记 ======
+  const generateDyNotes=async()=>{
+    if(!dySelStyles.length){alert("请至少选择一种图文风格");return;}
+    setDyBusy(true);setDyPhase("generate");setDyNotes([]);setDySel(0);
+
+    const styleDescs={"干货教程":"步骤清晰的教学图文","产品种草":"直接安利推荐，真实体验","对比测评":"使用前后/产品横评对比","避坑指南":"踩坑经验/注意事项","清单合集":"好物清单/推荐列表","经验分享":"个人真实体验分享","热点蹭流":"结合热点话题植入产品","痛点解决":"直击痛点给方案"};
+    const styleList=dySelStyles.map((s,i)=>`${i+1}. ${s}：${styleDescs[s]||s}`).join("\n");
+
+    try{
+      console.log("[DY] Step 2: Gemini generating",dySelStyles);
+      const genPrompt=`你是一位精通抖音图文的爆款内容创作者。现在有一份来自真实抖音爆款图文的深度拆解报告（由AI联网搜索并分析得出），请严格基于这份报告为客户创作${dySelStyles.length}篇抖音图文笔记。
+
+注意：抖音图文不是视频脚本，是图片+文字形式的内容，类似小红书笔记但要适配抖音平台的风格和算法。抖音图文的特点：标题更短更有冲击力、文案更精炼、封面图决定点击率、标签SEO非常重要。
+
+【真实爆款拆解报告】
+${dyAnalysisText.slice(0,6000)}
+
+【客户产品/服务信息】
+名称：${dyProd}
+${dyAudience?"目标受众："+dyAudience:""}
+${dySelling?"核心卖点："+dySelling:""}
+
+【${dySelStyles.length}篇图文的风格】
+${styleList}
+
+【铁律——不遵守等于白做】
+1. 标题必须套用报告中的标题公式，带emoji，不超过20字，每篇给3个备选
+2. 开头必须套用报告中的hook模板，不要写废话开头
+3. 正文结构必须参考报告中的winning_structures，300-600字，emoji分段
+4. 信任元素必须参考报告中的trust_tactics
+5. 转化设计必须参考报告中的conversion_tactics，自然引导不硬广
+6. 语气必须参考报告中的tone_style，像真人写的不像AI
+7. 标签必须优先使用报告中的hot_hashtags，每篇6-10个（抖音图文标签可以更多）
+8. 每篇图文的标题公式、开头hook、结构必须各不相同
+9. 要给出具体的图片内容建议（每张图放什么内容、文字怎么排）
+
+严格按以下JSON输出，不要有JSON之外的文字：
+{
+  "notes":[
+    {
+      "style":"风格名称",
+      "titles":["标题1（带emoji，不超20字）","标题2","标题3"],
+      "content":"正文内容（300-600字，用\\n换行，emoji分段，像真人写的）",
+      "hashtags":["#标签1","#标签2","#标签3","#标签4","#标签5","#标签6"],
+      "image_plan":[
+        {"page":1,"content":"封面图：放什么内容、文字怎么排、什么配色"},
+        {"page":2,"content":"第2张图内容建议"}
+      ],
+      "interaction_guide":"互动引导语",
+      "cover_suggestion":"封面设计建议（配色/文字/构图）",
+      "best_post_time":"最佳发布时间"
+    }
+  ]
+}`;
+      const genRaw=await callGemini(genPrompt);
+      const gm=genRaw.match(/\{[\s\S]*\}/);
+      if(!gm)throw new Error("Gemini返回格式异常");
+      const parsed=JSON.parse(gm[0]);
+      const notes=parsed.notes||[];
+      if(!notes.length)throw new Error("未生成图文");
+      setDyNotes(notes);
+      setDyPhase("done");
+    }catch(e){
+      console.error("[DY] generate error:",e);
+      alert("生成失败："+e.message);
+      setDyPhase("analyzed");
+    }finally{
+      setDyBusy(false);
+    }
+  };
+
+  // ====== 微信公众号：第一步 搜索+拆解 ======
+  const searchWx=async()=>{
+    if(!wxProd.trim()){alert("请填写产品/服务名称");return;}
+    setWxBusy(true);setWxArticles([]);setWxSel(0);setWxAnalysis(null);setWxAnalysisText("");setWxRecStyles([]);setWxSelStyles([]);setWxPhase("search");
+
+    const searchPrompt=`你是一位顶级微信公众号内容策略师，擅长从真实爆款文章中提炼可复用的内容模式和涨粉套路。
+
+现在有一个客户需要在微信公众号上推广，以下是他的信息：
+- 产品/服务：${wxProd}
+${wxAudience?"- 目标受众："+wxAudience:""}
+${wxSelling?"- 核心卖点："+wxSelling:""}
+
+请你完成以下任务：
+
+【第一步：智能选词】
+根据客户的产品信息，自主推导出5-8个最有效的微信公众号搜索关键词。要覆盖：
+- 产品/服务的直接关键词
+- 所属行业/品类词
+- 目标受众的需求词、痛点词
+- 竞品/同行常用的内容标签词
+- 场景词、热点词
+不需要客户提供，你自己判断。
+
+【第二步：联网搜索爆款文章】
+用上面推导出的关键词，联网搜索微信公众号上的真实爆款文章。重点筛选符合以下"爆款"标准的文章：
+
+📊 爆款判定标准（满足任意2条即算爆款）：
+① 10w+阅读：阅读量超过10万，绝对爆款
+② 高在看率：在看数 ≥ 阅读量×2%——说明内容引发共鸣，读者愿意公开表态
+③ 高转发率：分享/转发数高——说明内容有社交传播价值
+④ 低粉爆文：公众号粉丝不多但单篇阅读量远超日常——说明纯靠内容质量
+⑤ 高留言互动：精选留言数量多且质量高——说明引发了深度讨论
+⑥ 时效爆款：最近3个月内发布且表现突出——说明当前读者偏好
+⑦ 垂直领域头部：在该细分领域排名前列的文章
+
+🔍 额外关注：
+- 同一个公众号多篇爆款，重点分析——说明其方法论可复用
+- 注意区分"标题党假爆款"和"内容质量真爆款"，优先真爆款
+- 关注留言区高频反馈和读者真实需求
+
+请尽量找到8-15篇符合条件的爆款文章。
+
+【第三步：深度拆解】
+对找到的爆款文章逐一拆解，综合提炼共性规律：
+
+1. 标题公式：提取可直接套用的标题模板（公众号标题特征：悬念、数字、痛点、反常识）
+2. 开头Hook：前两段抓注意力的手法（故事开场/数据冲击/痛点描述/悬念设置/热点切入）
+3. 内容结构：正文组织方式（总分总/递进式/并列式/故事线/问答式）
+4. 信任建立：数据引用、案例支撑、专家背书、用户证言、从业经验
+5. 转化设计：引导关注/转发/留言/加微信的CTA位置和写法
+6. 语气风格：用词习惯、段落长度、人设调性
+7. 排版特征：小标题使用、段落节奏、金句设计
+
+【第四步：推荐创作风格】
+根据拆解结果，推荐3-5种最适合该产品的公众号文章风格。从以下风格库中选择并排序：
+- 深度长文：深入分析、逻辑严密、适合专业领域和行业分析
+- 干货清单：条理清晰、实用价值高、适合工具/方法/资源类
+- 案例拆解：真实案例深度分析、适合商业/营销/成长类
+- 观点输出：鲜明立场、引发讨论、适合时评/行业观察
+- 故事叙事：故事驱动、情感共鸣、适合品牌故事/用户故事
+- 数据报告：数据驱动、图表支撑、适合行业报告/趋势分析
+- 访谈对话：对话形式、真实感强、适合人物专访/经验分享
+- 热点评论：热点切入、独特视角、适合时效性内容
+
+每个推荐风格要说明：为什么适合、在爆款中的占比、预期效果。
+
+请用JSON格式返回，不要有JSON之外的文字：
+{
+  "search_keywords":["搜索关键词1","关键词2","关键词3"],
+  "searched_articles":[
+    {"title":"文章标题","author":"公众号名称","reads":"阅读量","likes":"在看数","comments":"留言数","shares":"转发数","why_viral":"命中了哪条爆款标准","is_ad":false,"summary":"内容摘要（80字）"}
+  ],
+  "title_formulas":[
+    {"formula":"可复用的标题公式","example":"具体示例","why":"为什么有效","used_count":"多少篇爆款用了类似公式"}
+  ],
+  "opening_hooks":[
+    {"type":"hook类型","template":"可复用模板","example":"真实爆款开头原文"}
+  ],
+  "winning_structures":[
+    {"name":"结构名称","outline":["段落1功能","段落2","段落3","段落4","段落5"],"description":"为什么有效","frequency":"在爆款中出现的频率"}
+  ],
+  "trust_tactics":["策略1","策略2","策略3","策略4"],
+  "conversion_tactics":[
+    {"tactic":"转化策略","example":"真实CTA文案","position":"位置"}
+  ],
+  "tone_style":"综合语气风格（100字，涵盖人设/用词/段落节奏）",
+  "key_insights":["关键洞察1","洞察2","洞察3"],
+  "recommended_styles":[
+    {"style":"风格名称","reason":"为什么适合这个产品（30字）","match":"高/中/低","frequency":"在爆款中占比如 40%"}
+  ]
+}`;
+
+    try{
+      console.log("[WX] Step 1: Qwen searching for",wxProd);
+      const searchRaw=await callQwen(searchPrompt);
+      console.log("[WX] Qwen raw length:",searchRaw.length);
+
+      let analysisData=null;
+      const jm=searchRaw.match(/\{[\s\S]*\}/);
+      if(jm){try{analysisData=JSON.parse(jm[0]);}catch(e){console.log("[WX] JSON parse err, raw text");}}
+      const aText=analysisData?JSON.stringify(analysisData,null,2):searchRaw;
+      setWxAnalysis(analysisData||{raw:searchRaw});
+      setWxAnalysisText(aText);
+
+      const rec=analysisData?.recommended_styles||[];
+      setWxRecStyles(rec);
+      setWxSelStyles(rec.slice(0,3).map(r=>r.style));
+      setWxPhase("analyzed");
+    }catch(e){
+      console.error("[WX] search error:",e);
+      alert("搜索失败："+e.message);
+      setWxPhase("");
+    }finally{
+      setWxBusy(false);
+    }
+  };
+
+  // ====== 微信公众号：第二步 生成文章 ======
+  const generateWxArticles=async()=>{
+    if(!wxSelStyles.length){alert("请至少选择一种文章风格");return;}
+    setWxBusy(true);setWxPhase("generate");setWxArticles([]);setWxSel(0);
+
+    const styleDescs={"深度长文":"深入分析、逻辑严密、专业领域","干货清单":"条理清晰、实用价值高、工具方法","案例拆解":"真实案例深度分析、商业营销","观点输出":"鲜明立场、引发讨论、行业观察","故事叙事":"故事驱动、情感共鸣、品牌故事","数据报告":"数据驱动、图表支撑、趋势分析","访谈对话":"对话形式、真实感强、经验分享","热点评论":"热点切入、独特视角、时效性强"};
+    const styleList=wxSelStyles.map((s,i)=>`${i+1}. ${s}：${styleDescs[s]||s}`).join("\n");
+
+    try{
+      console.log("[WX] Step 2: Gemini generating",wxSelStyles);
+      const genPrompt=`你是一位精通微信公众号的爆款内容创作者。现在有一份来自真实微信公众号爆款文章的深度拆解报告（由AI联网搜索并分析得出），请严格基于这份报告为客户创作${wxSelStyles.length}篇微信公众号文章。
+
+【真实爆款拆解报告】
+${wxAnalysisText.slice(0,6000)}
+
+【客户产品/服务信息】
+名称：${wxProd}
+${wxAudience?"目标受众："+wxAudience:""}
+${wxSelling?"核心卖点："+wxSelling:""}
+
+【${wxSelStyles.length}篇文章的风格】
+${styleList}
+
+【铁律——不遵守等于白做】
+1. 标题必须套用报告中的标题公式，不要自己发明。每篇给3个备选标题
+2. 开头必须套用报告中的hook模板，前两段就要抓住读者，不要写"今天给大家分享"这种废话开头
+3. 正文结构必须参考报告中的winning_structures，1500-3000字，有清晰的段落层次
+4. 信任元素必须参考报告中的trust_tactics，用具体数据和案例
+5. 转化设计必须参考报告中的conversion_tactics，自然引导不硬广
+6. 语气必须参考报告中的tone_style，像真人写的不像AI
+7. 每篇文章要有小标题分段，适合公众号阅读体验
+8. 每篇文章的标题公式、开头hook、结构必须各不相同
+
+严格按以下JSON输出，不要有JSON之外的文字：
+{
+  "articles":[
+    {
+      "style":"风格名称",
+      "titles":["标题1","标题2","标题3"],
+      "summary":"文章摘要/导读（50-80字，用于文章开头灰色引言区）",
+      "content":"正文内容（1500-3000字，用\\n换行，用【小标题】分段，像真人写的）",
+      "tags":["标签1","标签2","标签3","标签4","标签5"],
+      "interaction_guide":"文末互动引导语（引导留言/在看/转发）",
+      "cover_suggestion":"封面图建议（配色/文字/构图）",
+      "best_post_time":"最佳发布时间"
+    }
+  ]
+}`;
+      const genRaw=await callGemini(genPrompt);
+      const gm=genRaw.match(/\{[\s\S]*\}/);
+      if(!gm)throw new Error("Gemini返回格式异常");
+      const parsed=JSON.parse(gm[0]);
+      const articles=parsed.articles||[];
+      if(!articles.length)throw new Error("未生成文章");
+      setWxArticles(articles);
+      setWxPhase("done");
+    }catch(e){
+      console.error("[WX] generate error:",e);
+      alert("生成失败："+e.message);
+      setWxPhase("analyzed");
+    }finally{
+      setWxBusy(false);
+    }
+  };
+
   const startCreate=async()=>{
     setModal(false);setPg("create");setCs("ai-generating");setAiScripts([]);
     const tmplInfo=libSelTmpl?[
@@ -1359,6 +1763,31 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
 .xhs-style-card.on .xsc-reason{color:var(--t1)}
 .xhs-resrch-btn{font-size:11px;color:var(--t3);background:none;border:none;cursor:pointer;font-family:inherit;padding:4px 8px;display:flex;align-items:center;gap:4px;border-radius:6px;transition:all .15s;margin-left:auto}
 .xhs-resrch-btn:hover{color:var(--p);background:var(--pbg)}
+/* douyin preview */
+.dy-card{background:var(--s);border-radius:16px;border:1px solid var(--bl);overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.04)}
+.dy-card-hd{padding:16px 20px;border-bottom:1px solid var(--bl);display:flex;align-items:center;gap:8px}
+.dy-card-hd-ic{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#111,#333);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700}
+.dy-card-hd-t{font-size:14px;font-weight:700;color:var(--t1)}.dy-card-hd-d{font-size:11px;color:var(--t3)}
+.dy-sec{padding:16px 20px;border-bottom:1px solid var(--bl)}
+.dy-sec:last-child{border-bottom:none}
+.dy-sec-t{font-size:12px;font-weight:700;color:var(--t2);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.dy-tags{display:flex;flex-wrap:wrap;gap:6px}
+.dy-tag{padding:4px 12px;border-radius:14px;background:#F0F0F0;color:#333;font-size:11px;font-weight:500}
+.dy-meta{font-size:12px;color:var(--t2);line-height:1.7;padding:10px 14px;background:var(--s2);border-radius:10px;border:1px solid var(--bl)}
+.dy-copy-all{width:100%;padding:12px;border-radius:0 0 16px 16px;border:none;border-top:1px solid var(--bl);background:var(--s);color:var(--p);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;transition:var(--tr)}.dy-copy-all:hover{background:var(--pbg)}
+/* wechat preview */
+.wx-card{background:var(--s);border-radius:16px;border:1px solid var(--bl);overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.04)}
+.wx-card-hd{padding:16px 20px;border-bottom:1px solid var(--bl);display:flex;align-items:center;gap:8px}
+.wx-card-hd-ic{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#07C160,#06AD56);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+.wx-card-hd-t{font-size:14px;font-weight:700;color:var(--t1)}
+.wx-sec{padding:16px 20px;border-bottom:1px solid var(--bl)}
+.wx-sec:last-child{border-bottom:none}
+.wx-sec-t{font-size:12px;font-weight:700;color:var(--t2);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.wx-summary{padding:12px 14px;border-radius:10px;background:linear-gradient(135deg,#F0FAF4,#FFF);border:1px solid #C8E6D0;font-size:13px;color:#15803D;line-height:1.7;font-style:italic}
+.wx-content{font-size:13px;line-height:1.85;color:var(--t1);white-space:pre-wrap;word-break:break-word}
+.wx-tags{display:flex;flex-wrap:wrap;gap:6px}
+.wx-tag{padding:4px 12px;border-radius:14px;background:#E8F8EE;color:#07C160;font-size:11px;font-weight:500}
+.wx-copy-all{width:100%;padding:12px;border-radius:0 0 16px 16px;border:none;border-top:1px solid var(--bl);background:var(--s);color:#07C160;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;transition:var(--tr)}.wx-copy-all:hover{background:#F0FAF4}
 /* schedule page */
 .sch-wrap{display:flex;height:calc(100vh - 52px);overflow:hidden}
 .sch-main{flex:1;display:flex;flex-direction:column;overflow:hidden}
@@ -1667,34 +2096,175 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                 {xhsBusy&&xhsPhase==="generate"?<><I.Sparkle/> 正在生成 {xhsSelStyles.length} 篇笔记...</>:<><I.Sparkle/> 生成 {xhsSelStyles.length} 篇笔记</>}
               </button>
               </>}
-              </>:<>
+
+              </>:itPlat==="抖音"?<>
               <div className="it-fg">
-                <div className="it-fg-l">标题 <span className="it-fg-ct">{itTitle.length}/30</span></div>
-                <input className="it-inp" value={itTitle} onChange={e=>setItTitle(e.target.value.slice(0,30))} placeholder="请输入吸引人的标题..."/>
+                <div className="it-fg-l">产品/服务名称 <span style={{color:"#EF4444"}}>*</span></div>
+                <input className="it-inp" value={dyProd} onChange={e=>setDyProd(e.target.value)} placeholder="如：健身私教课、防晒霜、编程培训、奶茶加盟..."/>
               </div>
 
               <div className="it-fg">
-                <div className="it-fg-l">语气风格</div>
-                <select className="it-sel" value={itStyle} onChange={e=>setItStyle(e.target.value)}>
-                  <option>专业严谨</option><option>轻松活泼</option><option>温暖治愈</option><option>幽默搞笑</option><option>简洁干练</option>
-                </select>
+                <div className="it-fg-l">目标受众 <span className="it-fg-ct">选填</span></div>
+                <input className="it-inp" value={dyAudience} onChange={e=>setDyAudience(e.target.value)} placeholder="如：18-30岁年轻人、宝妈群体、健身爱好者..."/>
               </div>
 
               <div className="it-fg">
-                <div className="it-fg-l">正文内容 <span className="it-fg-link">导入文档</span></div>
-                <textarea className="it-inp" rows={10} value={itContent} onChange={e=>setItContent(e.target.value.slice(0,2000))} placeholder="在此输入或粘贴您的文章内容..." style={{resize:"vertical"}}/>
-                <div style={{textAlign:"right",fontSize:10,color:"var(--t3)",marginTop:4}}>{itContent.length}/2000 字</div>
+                <div className="it-fg-l">核心卖点 <span className="it-fg-ct">选填，多个卖点用逗号分隔</span></div>
+                <textarea className="it-inp" rows={3} value={dySelling} onChange={e=>setDySelling(e.target.value)} placeholder="如：7天见效、一对一指导、无门槛加盟、买一送一..." style={{resize:"vertical"}}/>
               </div>
 
-              <button className="it-gen-btn"><I.Sparkle/> AI 智能排版</button>
-
+              {/* 第一步按钮：搜索爆款 */}
+              {(dyPhase===""||dyPhase==="search")&&<>
+              <button className="it-gen-btn" onClick={searchDy} disabled={dyBusy} style={dyBusy?{opacity:.7,cursor:"wait"}:{}}>
+                {dyBusy?<><I.Search/> 正在搜索同行爆款图文...</>:<><I.Search/> 搜索同行爆款</>}
+              </button>
+              {dyBusy&&<div style={{padding:"12px 14px",background:"var(--s2)",borderRadius:10,border:"1px solid var(--bl)",marginBottom:12}}>
+                <div style={{display:"flex",gap:8,marginBottom:8}}>
+                  <div style={{flex:1,height:4,borderRadius:2,background:"var(--pl)",transition:"background .3s"}}/>
+                  <div style={{flex:1,height:4,borderRadius:2,background:"var(--s3)"}}/>
+                </div>
+                <div style={{fontSize:11,color:"var(--t2)"}}>千问 AI 联网搜索抖音爆款图文，拆解标题、结构、转化套路...</div>
+              </div>}
               <div className="it-tip">
-                <div className="it-tip-ic"><I.Bulb/></div>
+                <div className="it-tip-ic" style={{background:"#F0F0F0",color:"#333"}}><I.Bulb/></div>
                 <div>
-                  <div className="it-tip-t">排版小贴士</div>
-                  <div className="it-tip-d">尝试在正文中添加 "##" 作为小标题，AI 能更准确地识别文章结构并生成更有层次感的排版。</div>
+                  <div className="it-tip-t">爆款驱动生成</div>
+                  <div className="it-tip-d">AI 自动推导搜索词 → 联网搜索真实爆款 → 拆解标题、结构、转化套路 → 推荐风格 → 你选风格后生成图文</div>
                 </div>
               </div>
+              </>}
+
+              {/* 第二步：拆解完成，展示推荐风格 + 生成按钮 */}
+              {(dyPhase==="analyzed"||dyPhase==="generate"||dyPhase==="done")&&<>
+              <div className="xhs-result">
+                <div style={{padding:"12px 14px",background:"var(--s2)",borderRadius:10,border:"1px solid var(--bl)",marginBottom:14}}>
+                  <div style={{fontSize:12,fontWeight:700,marginBottom:6,display:"flex",alignItems:"center",gap:6,color:"var(--t1)"}}><I.Check style={{color:"var(--p)"}}/> 爆款拆解完成</div>
+                  {dyAnalysis&&<div style={{fontSize:11,color:"var(--t2)",lineHeight:1.7}}>
+                    {dyAnalysis.searched_notes&&<>已搜索到 <b>{dyAnalysis.searched_notes.length}</b> 篇爆款图文</>}
+                    {dyAnalysis.title_formulas&&<>，提炼 <b>{dyAnalysis.title_formulas.length}</b> 个标题公式</>}
+                    {dyAnalysis.winning_structures&&<>、<b>{dyAnalysis.winning_structures.length}</b> 种内容结构</>}
+                    {dyAnalysis.hot_hashtags&&<>，收录 <b>{dyAnalysis.hot_hashtags.length}</b> 个热门标签</>}
+                    。AI 已完成深度拆解，请选择风格后生成图文。
+                  </div>}
+                  <button className="xhs-resrch-btn" onClick={()=>{
+                    setDyPhase("");setDyAnalysis(null);setDyAnalysisText("");setDyRecStyles([]);setDySelStyles([]);
+                  }}><I.Refresh/> 重新搜索</button>
+                </div>
+
+                <div className="xhs-style-hd">
+                  <div className="xhs-style-hd-t">选择创作风格</div>
+                  <div className="xhs-style-hd-ct">已选 {dySelStyles.length} / {dyRecStyles.length}</div>
+                </div>
+
+                <div className="xhs-style-list">
+                  {(()=>{const styleIcons={"干货教程":"📚","产品种草":"🛒","对比测评":"⚖️","避坑指南":"🛡️","清单合集":"📋","经验分享":"💬","热点蹭流":"🔥","痛点解决":"💡"};const badgeCls=m=>m==="高"?"s":m==="中"?"a":"b";const badgeTxt=m=>m==="高"?"S · 强推":m==="中"?"A · 推荐":"B · 可选";return dyRecStyles.map((r,i)=>{const sel=dySelStyles.includes(r.style);return(
+                    <div key={i} className={`xhs-style-card${sel?" on":""}`} onClick={()=>setDySelStyles(prev=>prev.includes(r.style)?prev.filter(s=>s!==r.style):[...prev,r.style])}>
+                      <div className="xsc-top">
+                        <div className="xsc-ck">{sel&&<I.Check style={{color:"#fff",width:10,height:10}}/>}</div>
+                        <div className="xsc-ic">{styleIcons[r.style]||"🎬"}</div>
+                        <span className="xsc-name">{r.style}</span>
+                        <div className="xsc-right">
+                          {r.match&&<span className={`xsc-badge ${badgeCls(r.match)}`}>{badgeTxt(r.match)}</span>}
+                          {r.frequency&&<span className="xsc-freq">{r.frequency}</span>}
+                        </div>
+                      </div>
+                      {r.reason&&<div className="xsc-reason">{r.reason}</div>}
+                    </div>
+                  );})})()}
+                </div>
+
+                {dyRecStyles.length===0&&<div style={{fontSize:11,color:"var(--t3)",textAlign:"center",padding:20,background:"var(--s2)",borderRadius:12,border:"1px dashed var(--b)"}}>未获取到推荐风格，请重新搜索</div>}
+              </div>
+
+              <button className="it-gen-btn" onClick={generateDyNotes} disabled={dyBusy||!dySelStyles.length} style={dyBusy?{opacity:.7,cursor:"wait"}:!dySelStyles.length?{opacity:.5,cursor:"not-allowed"}:{}}>
+                {dyBusy&&dyPhase==="generate"?<><I.Sparkle/> 正在生成 {dySelStyles.length} 篇图文...</>:<><I.Sparkle/> 生成 {dySelStyles.length} 篇图文</>}
+              </button>
+              </>}
+
+              </>:<>
+              <div className="it-fg">
+                <div className="it-fg-l">产品/服务名称 <span style={{color:"#EF4444"}}>*</span></div>
+                <input className="it-inp" value={wxProd} onChange={e=>setWxProd(e.target.value)} placeholder="如：企业管理咨询、少儿编程课、健康食品品牌..."/>
+              </div>
+
+              <div className="it-fg">
+                <div className="it-fg-l">目标受众 <span className="it-fg-ct">选填</span></div>
+                <input className="it-inp" value={wxAudience} onChange={e=>setWxAudience(e.target.value)} placeholder="如：中小企业主、30-45岁家长、职场白领..."/>
+              </div>
+
+              <div className="it-fg">
+                <div className="it-fg-l">核心卖点 <span className="it-fg-ct">选填，多个卖点用逗号分隔</span></div>
+                <textarea className="it-inp" rows={3} value={wxSelling} onChange={e=>setWxSelling(e.target.value)} placeholder="如：10年行业经验、500+成功案例、一对一定制方案..." style={{resize:"vertical"}}/>
+              </div>
+
+              {/* 第一步按钮：搜索爆款 */}
+              {(wxPhase===""||wxPhase==="search")&&<>
+              <button className="it-gen-btn" onClick={searchWx} disabled={wxBusy} style={wxBusy?{opacity:.7,cursor:"wait"}:{}}>
+                {wxBusy?<><I.Search/> 正在搜索同行爆款文章...</>:<><I.Search/> 搜索同行爆款</>}
+              </button>
+              {wxBusy&&<div style={{padding:"12px 14px",background:"var(--s2)",borderRadius:10,border:"1px solid var(--bl)",marginBottom:12}}>
+                <div style={{display:"flex",gap:8,marginBottom:8}}>
+                  <div style={{flex:1,height:4,borderRadius:2,background:"var(--pl)",transition:"background .3s"}}/>
+                  <div style={{flex:1,height:4,borderRadius:2,background:"var(--s3)"}}/>
+                </div>
+                <div style={{fontSize:11,color:"var(--t2)"}}>千问 AI 联网搜索微信公众号爆款文章，拆解套路并推荐创作风格...</div>
+              </div>}
+              <div className="it-tip">
+                <div className="it-tip-ic" style={{background:"#E8F8EE",color:"#07C160"}}><I.Bulb/></div>
+                <div>
+                  <div className="it-tip-t">爆款驱动生成</div>
+                  <div className="it-tip-d">AI 自动推导搜索词 → 联网搜索真实爆款 → 拆解套路 → 推荐风格 → 你选风格后生成文章</div>
+                </div>
+              </div>
+              </>}
+
+              {/* 第二步：拆解完成，展示推荐风格 + 生成按钮 */}
+              {(wxPhase==="analyzed"||wxPhase==="generate"||wxPhase==="done")&&<>
+              <div className="xhs-result">
+                <div style={{padding:"12px 14px",background:"var(--s2)",borderRadius:10,border:"1px solid var(--bl)",marginBottom:14}}>
+                  <div style={{fontSize:12,fontWeight:700,marginBottom:6,display:"flex",alignItems:"center",gap:6,color:"var(--t1)"}}><I.Check style={{color:"#07C160"}}/> 爆款拆解完成</div>
+                  {wxAnalysis&&<div style={{fontSize:11,color:"var(--t2)",lineHeight:1.7}}>
+                    {wxAnalysis.searched_articles&&<>已搜索到 <b>{wxAnalysis.searched_articles.length}</b> 篇爆款文章</>}
+                    {wxAnalysis.title_formulas&&<>，提炼 <b>{wxAnalysis.title_formulas.length}</b> 个标题公式</>}
+                    {wxAnalysis.winning_structures&&<>、<b>{wxAnalysis.winning_structures.length}</b> 种内容结构</>}
+                    {wxAnalysis.opening_hooks&&<>、<b>{wxAnalysis.opening_hooks.length}</b> 种开头 Hook</>}
+                    。AI 已完成深度拆解，请选择风格后生成文章。
+                  </div>}
+                  <button className="xhs-resrch-btn" onClick={()=>{
+                    setWxPhase("");setWxAnalysis(null);setWxAnalysisText("");setWxRecStyles([]);setWxSelStyles([]);
+                  }}><I.Refresh/> 重新搜索</button>
+                </div>
+
+                <div className="xhs-style-hd">
+                  <div className="xhs-style-hd-t">选择创作风格</div>
+                  <div className="xhs-style-hd-ct">已选 {wxSelStyles.length} / {wxRecStyles.length}</div>
+                </div>
+
+                <div className="xhs-style-list">
+                  {(()=>{const styleIcons={"深度长文":"📖","干货清单":"📋","案例拆解":"🔍","观点输出":"💡","故事叙事":"📝","数据报告":"📊","访谈对话":"🎙️","热点评论":"🔥"};const badgeCls=m=>m==="高"?"s":m==="中"?"a":"b";const badgeTxt=m=>m==="高"?"S · 强推":m==="中"?"A · 推荐":"B · 可选";return wxRecStyles.map((r,i)=>{const sel=wxSelStyles.includes(r.style);return(
+                    <div key={i} className={`xhs-style-card${sel?" on":""}`} onClick={()=>setWxSelStyles(prev=>prev.includes(r.style)?prev.filter(s=>s!==r.style):[...prev,r.style])}>
+                      <div className="xsc-top">
+                        <div className="xsc-ck">{sel&&<I.Check style={{color:"#fff",width:10,height:10}}/>}</div>
+                        <div className="xsc-ic">{styleIcons[r.style]||"✏️"}</div>
+                        <span className="xsc-name">{r.style}</span>
+                        <div className="xsc-right">
+                          {r.match&&<span className={`xsc-badge ${badgeCls(r.match)}`}>{badgeTxt(r.match)}</span>}
+                          {r.frequency&&<span className="xsc-freq">{r.frequency}</span>}
+                        </div>
+                      </div>
+                      {r.reason&&<div className="xsc-reason">{r.reason}</div>}
+                    </div>
+                  );})})()}
+                </div>
+
+                {wxRecStyles.length===0&&<div style={{fontSize:11,color:"var(--t3)",textAlign:"center",padding:20,background:"var(--s2)",borderRadius:12,border:"1px dashed var(--b)"}}>未获取到推荐风格，请重新搜索</div>}
+              </div>
+
+              <button className="it-gen-btn" onClick={generateWxArticles} disabled={wxBusy||!wxSelStyles.length} style={wxBusy?{opacity:.7,cursor:"wait"}:!wxSelStyles.length?{opacity:.5,cursor:"not-allowed"}:{}}>
+                {wxBusy&&wxPhase==="generate"?<><I.Sparkle/> 正在生成 {wxSelStyles.length} 篇文章...</>:<><I.Sparkle/> 生成 {wxSelStyles.length} 篇文章</>}
+              </button>
+              </>}
+
               </>}
             </div>
           </div>
@@ -1777,13 +2347,181 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
               </div>
               );})()}
             </div>
+            :itPlat==="抖音"&&dyNotes.length>0?
+            <div style={{width:"100%",maxWidth:520,display:"flex",flexDirection:"column",gap:14,paddingBottom:24}}>
+              {dyAnalysis&&dyAnalysis.searched_notes&&<div style={{padding:"14px 16px",background:"var(--s)",borderRadius:12,border:"1px solid var(--bl)",fontSize:11,color:"var(--t2)",lineHeight:1.8}}>
+                <div style={{fontWeight:700,marginBottom:6,display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--t1)"}}><I.Search/> 爆款拆解报告</div>
+                {dyAnalysis.search_keywords&&<div style={{marginBottom:6}}>搜索词：{dyAnalysis.search_keywords.slice(0,6).map((k,i)=><span key={i} style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:"var(--s3)",marginRight:4,marginBottom:2,fontSize:10}}>{k}</span>)}</div>}
+                <div>找到 <b>{dyAnalysis.searched_notes.length}</b> 篇爆款图文{dyAnalysis.title_formulas&&<>，提炼 <b>{dyAnalysis.title_formulas.length}</b> 个标题公式</>}{dyAnalysis.winning_structures&&<>，<b>{dyAnalysis.winning_structures.length}</b> 种内容结构</>}</div>
+                {dyAnalysis.key_insights&&<div style={{marginTop:4,color:"var(--t3)"}}>{dyAnalysis.key_insights.slice(0,2).join(" · ")}</div>}
+              </div>}
+              <div className="xhs-tabs">
+                {dyNotes.map((n,i)=>(
+                  <button key={i} className={`xhs-tab ${dySel===i?"on":""}`} onClick={()=>setDySel(i)}>
+                    {n.style||("图文"+(i+1))}
+                  </button>
+                ))}
+              </div>
+              {(()=>{const note=dyNotes[dySel];if(!note)return null;return(
+              <div className="dy-card">
+                <div className="dy-card-hd">
+                  <div className="dy-card-hd-ic">DY</div>
+                  <div>
+                    <div className="dy-card-hd-t">{note.style||"抖音图文"}</div>
+                    <div className="dy-card-hd-d">{dyProd} · {dyAnalysis?"基于爆款拆解生成":"AI 生成"}</div>
+                  </div>
+                </div>
+
+                <div className="dy-sec">
+                  <div className="dy-sec-t">📌 标题选项 <span style={{fontSize:10,color:"var(--t3)",fontWeight:400}}>点击复制</span></div>
+                  {(note.titles||[]).map((t,i)=>(
+                    <div key={i} className="xhs-title-opt" onClick={()=>{navigator.clipboard.writeText(t)}}>
+                      <span className="xhs-title-n">{i+1}</span>
+                      <span style={{flex:1}}>{t}</span>
+                      <I.Copy/>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="dy-sec">
+                  <div className="dy-sec-t" style={{justifyContent:"space-between"}}>
+                    <span>📄 正文内容</span>
+                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                      <button className="xhs-copy-btn" onClick={()=>{setDyEditIdx(dyEditIdx===dySel?-1:dySel)}}><I.Edit/> {dyEditIdx===dySel?"完成":"编辑"}</button>
+                      <button className="xhs-copy-btn" onClick={()=>navigator.clipboard.writeText(note.content||"")}><I.Copy/> 复制正文</button>
+                    </div>
+                  </div>
+                  {dyEditIdx===dySel?<textarea style={{width:"100%",minHeight:260,fontSize:13,lineHeight:1.85,color:"var(--t1)",fontFamily:"inherit",border:"1.5px solid var(--pl)",borderRadius:10,padding:"12px 14px",background:"var(--s2)",resize:"vertical",outline:"none"}} value={note.content||""} onChange={e=>{const v=e.target.value;setDyNotes(prev=>prev.map((n,i)=>i===dySel?{...n,content:v}:n));}}/>:<div className="xhs-content">{note.content}</div>}
+                </div>
+
+                {note.hashtags?.length>0&&<div className="dy-sec">
+                  <div className="dy-sec-t">🏷️ 话题标签</div>
+                  <div className="dy-tags">{note.hashtags.map((h,i)=><span key={i} className="dy-tag">{h}</span>)}</div>
+                </div>}
+
+                {note.image_plan?.length>0&&<div className="dy-sec">
+                  <div className="dy-sec-t">🖼️ 图片规划 <span style={{fontSize:10,color:"var(--t3)",fontWeight:400}}>{note.image_plan.length} 张图</span></div>
+                  {note.image_plan.map((p,i)=>(
+                    <div key={i} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:i<note.image_plan.length-1?"1px solid var(--s3)":"none",fontSize:12}}>
+                      <div style={{width:28,height:28,borderRadius:6,background:"var(--s3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"var(--t3)",flexShrink:0}}>P{p.page||i+1}</div>
+                      <div style={{flex:1,color:"var(--t2)",lineHeight:1.5}}>{p.content}</div>
+                    </div>
+                  ))}
+                </div>}
+
+                {note.interaction_guide&&<div className="dy-sec">
+                  <div className="dy-sec-t">💬 互动引导</div>
+                  <div className="dy-meta">{note.interaction_guide}</div>
+                </div>}
+
+                {note.cover_suggestion&&<div className="dy-sec">
+                  <div className="dy-sec-t">🎨 封面建议</div>
+                  <div className="dy-meta">{note.cover_suggestion}</div>
+                </div>}
+
+                {note.best_post_time&&<div className="dy-sec">
+                  <div className="dy-sec-t">⏰ 最佳发布时间</div>
+                  <div className="dy-meta">{note.best_post_time}</div>
+                </div>}
+
+                <button className="dy-copy-all" onClick={()=>{
+                  const txt=[(note.titles||[])[0]||"","",note.content||"","",(note.hashtags||[]).join(" "),"",note.interaction_guide||""].join("\n");
+                  navigator.clipboard.writeText(txt);
+                }}>
+                  <I.Copy/> 一键复制全部内容
+                </button>
+              </div>
+              );})()}
+            </div>
+
+            :itPlat==="微信公众号"&&wxArticles.length>0?
+            <div style={{width:"100%",maxWidth:520,display:"flex",flexDirection:"column",gap:14,paddingBottom:24}}>
+              {wxAnalysis&&wxAnalysis.searched_articles&&<div style={{padding:"14px 16px",background:"var(--s)",borderRadius:12,border:"1px solid var(--bl)",fontSize:11,color:"var(--t2)",lineHeight:1.8}}>
+                <div style={{fontWeight:700,marginBottom:6,display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--t1)"}}><I.Search/> 爆款拆解报告</div>
+                {wxAnalysis.search_keywords&&<div style={{marginBottom:6}}>搜索词：{wxAnalysis.search_keywords.slice(0,6).map((k,i)=><span key={i} style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:"var(--s3)",marginRight:4,marginBottom:2,fontSize:10}}>{k}</span>)}</div>}
+                <div>找到 <b>{wxAnalysis.searched_articles.length}</b> 篇爆款文章{wxAnalysis.title_formulas&&<>，提炼 <b>{wxAnalysis.title_formulas.length}</b> 个标题公式</>}{wxAnalysis.winning_structures&&<>，<b>{wxAnalysis.winning_structures.length}</b> 种内容结构</>}</div>
+                {wxAnalysis.key_insights&&<div style={{marginTop:4,color:"var(--t3)"}}>{wxAnalysis.key_insights.slice(0,2).join(" · ")}</div>}
+              </div>}
+              <div className="xhs-tabs">
+                {wxArticles.map((a,i)=>(
+                  <button key={i} className={`xhs-tab ${wxSel===i?"on":""}`} onClick={()=>setWxSel(i)}>
+                    {a.style||("文章"+(i+1))}
+                  </button>
+                ))}
+              </div>
+              {(()=>{const art=wxArticles[wxSel];if(!art)return null;return(
+              <div className="wx-card">
+                <div className="wx-card-hd">
+                  <div className="wx-card-hd-ic">WX</div>
+                  <div>
+                    <div className="wx-card-hd-t">{art.style||"公众号文章"}</div>
+                    <div style={{fontSize:11,color:"var(--t3)"}}>{wxProd} · {wxAnalysis?"基于爆款拆解生成":"AI 生成"}</div>
+                  </div>
+                </div>
+
+                <div className="wx-sec">
+                  <div className="wx-sec-t">📌 标题选项 <span style={{fontSize:10,color:"var(--t3)",fontWeight:400}}>点击复制</span></div>
+                  {(art.titles||[]).map((t,i)=>(
+                    <div key={i} className="xhs-title-opt" onClick={()=>{navigator.clipboard.writeText(t)}}>
+                      <span className="xhs-title-n">{i+1}</span>
+                      <span style={{flex:1}}>{t}</span>
+                      <I.Copy/>
+                    </div>
+                  ))}
+                </div>
+
+                {art.summary&&<div className="wx-sec">
+                  <div className="wx-sec-t">📋 文章摘要</div>
+                  <div className="wx-summary">{art.summary}</div>
+                </div>}
+
+                <div className="wx-sec">
+                  <div className="wx-sec-t" style={{justifyContent:"space-between"}}>
+                    <span>📄 正文内容</span>
+                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                      <button className="xhs-copy-btn" onClick={()=>{setWxEditIdx(wxEditIdx===wxSel?-1:wxSel)}}><I.Edit/> {wxEditIdx===wxSel?"完成":"编辑"}</button>
+                      <button className="xhs-copy-btn" onClick={()=>navigator.clipboard.writeText(art.content||"")}><I.Copy/> 复制正文</button>
+                    </div>
+                  </div>
+                  {wxEditIdx===wxSel?<textarea style={{width:"100%",minHeight:400,fontSize:13,lineHeight:1.85,color:"var(--t1)",fontFamily:"inherit",border:"1.5px solid #07C160",borderRadius:10,padding:"12px 14px",background:"var(--s2)",resize:"vertical",outline:"none"}} value={art.content||""} onChange={e=>{const v=e.target.value;setWxArticles(prev=>prev.map((a,i)=>i===wxSel?{...a,content:v}:a));}}/>:<div className="wx-content">{art.content}</div>}
+                </div>
+
+                {art.tags?.length>0&&<div className="wx-sec">
+                  <div className="wx-sec-t">🏷️ 标签</div>
+                  <div className="wx-tags">{art.tags.map((h,i)=><span key={i} className="wx-tag">{h}</span>)}</div>
+                </div>}
+
+                {art.interaction_guide&&<div className="wx-sec">
+                  <div className="wx-sec-t">💬 互动引导</div>
+                  <div style={{fontSize:12,color:"var(--t2)",lineHeight:1.7,padding:"10px 14px",background:"var(--s2)",borderRadius:10,border:"1px solid var(--bl)"}}>{art.interaction_guide}</div>
+                </div>}
+
+                {art.cover_suggestion&&<div className="wx-sec">
+                  <div className="wx-sec-t">🖼️ 封面建议</div>
+                  <div style={{fontSize:12,color:"var(--t2)",lineHeight:1.7,padding:"10px 14px",background:"var(--s2)",borderRadius:10,border:"1px solid var(--bl)"}}>{art.cover_suggestion}</div>
+                </div>}
+
+                {art.best_post_time&&<div className="wx-sec">
+                  <div className="wx-sec-t">⏰ 最佳发布时间</div>
+                  <div style={{fontSize:12,color:"var(--t2)",lineHeight:1.7,padding:"10px 14px",background:"var(--s2)",borderRadius:10,border:"1px solid var(--bl)"}}>{art.best_post_time}</div>
+                </div>}
+
+                <button className="wx-copy-all" onClick={()=>{
+                  const txt=[(art.titles||[])[0]||"","",art.summary||"","",art.content||"","",(art.tags||[]).join(" "),"",art.interaction_guide||""].join("\n");
+                  navigator.clipboard.writeText(txt);
+                }}>
+                  <I.Copy/> 一键复制全部内容
+                </button>
+              </div>
+              );})()}
+            </div>
             :
             <div className="it-preview">
-              {itPlat==="小红书"&&xhsBusy?
+              {(itPlat==="小红书"&&xhsBusy)||(itPlat==="抖音"&&dyBusy)||(itPlat==="微信公众号"&&wxBusy)?
               <div className="it-pv-empty">
-                <div className="it-pv-ic" style={{animation:"spin 2s linear infinite",background:"#FFF0F1",color:"#FF2442"}}>{xhsPhase==="search"?"🔍":"📝"}</div>
-                <div className="it-pv-t">{xhsPhase==="search"?"正在搜索同行爆款笔记...":"正在生成小红书笔记..."}</div>
-                <div className="it-pv-d">{xhsPhase==="search"?<>千问 AI 联网搜索小红书爆款<br/>拆解标题、结构、转化套路</>:<>基于真实爆款拆解报告<br/>Gemini 正在生成 {xhsSelStyles.length||3} 篇笔记</>}</div>
+                <div className="it-pv-ic" style={{animation:"spin 2s linear infinite",background:itPlat==="小红书"?"#FFF0F1":itPlat==="微信公众号"?"#E8F8EE":"#F0F0F0",color:itPlat==="小红书"?"#FF2442":itPlat==="微信公众号"?"#07C160":"#333"}}>{(itPlat==="小红书"?xhsPhase:itPlat==="微信公众号"?wxPhase:dyPhase)==="search"?"🔍":"📝"}</div>
+                <div className="it-pv-t">{(()=>{const phase=itPlat==="小红书"?xhsPhase:itPlat==="微信公众号"?wxPhase:dyPhase;const name=itPlat==="小红书"?"笔记":itPlat==="微信公众号"?"文章":"视频";return phase==="search"?`正在搜索同行爆款${name}...`:`正在生成${itPlat==="小红书"?"小红书笔记":itPlat==="微信公众号"?"公众号文章":"抖音图文"}...`;})()}</div>
+                <div className="it-pv-d">{(()=>{const phase=itPlat==="小红书"?xhsPhase:itPlat==="微信公众号"?wxPhase:dyPhase;return phase==="search"?<>千问 AI 联网搜索{itPlat==="小红书"?"小红书":itPlat==="微信公众号"?"微信公众号":"抖音"}爆款<br/>拆解{itPlat==="小红书"?"标题、结构、转化套路":itPlat==="微信公众号"?"标题、结构、转化套路":"Hook、脚本结构、转化套路"}</>:<>基于真实爆款拆解报告<br/>Gemini 正在生成 {itPlat==="小红书"?(xhsSelStyles.length||3)+" 篇笔记":itPlat==="微信公众号"?(wxSelStyles.length||3)+" 篇文章":(dySelStyles.length||3)+" 个脚本"}</>;})()}</div>
                 <div className="it-pv-skel">
                   <div className="it-pv-skel-line w60"/>
                   <div className="it-pv-skel-line w80"/>
@@ -1794,9 +2532,9 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
               </div>
               :
               <div className="it-pv-empty">
-                <div className="it-pv-ic">{itPlat==="小红书"?"📝":"✨"}</div>
-                <div className="it-pv-t">{itPlat==="小红书"?"等待生成小红书笔记":"等待生成预览"}</div>
-                <div className="it-pv-d">{itPlat==="小红书"?<>在左侧填写产品信息并点击<br/>"搜索同行爆款" 开始分析</>:<>在左侧面板输入内容并点击<br/>"AI 智能排版" 即可查看效果</>}</div>
+                <div className="it-pv-ic">{itPlat==="小红书"?"📝":itPlat==="抖音"?"🎬":"📄"}</div>
+                <div className="it-pv-t">{itPlat==="小红书"?"等待生成小红书笔记":itPlat==="抖音"?"等待生成抖音图文":"等待生成公众号文章"}</div>
+                <div className="it-pv-d">{<>在左侧填写产品信息并点击<br/>"搜索同行爆款" 开始分析</>}</div>
                 <div className="it-pv-skel">
                   <div className="it-pv-skel-line w60"/>
                   <div className="it-pv-skel-line w80"/>

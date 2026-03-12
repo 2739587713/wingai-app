@@ -31,14 +31,19 @@ const hdrs = { "Content-Type": "application/json", Authorization: "Bearer " + AP
 /* ═══ Preset avatars ═══ */
 const PRESETS = [
   { id: "p1", nm: "商务男", tags: "商务 · 正式 · 专业", gender: "male", age: "30-35", style: "写实", color: "#3B82F6",
+    imgUrl: "/avatars/p1.png",
     imgPrompt: "Professional headshot portrait of a Chinese businessman aged 30-35, wearing a navy blue suit with white shirt, clean-shaven, confident gentle smile, looking directly at camera, face occupying 60 percent of frame, soft studio lighting from front-left, shallow depth of field, plain light gray gradient background, shoulders and upper chest visible, natural skin texture, high resolution, photorealistic" },
   { id: "p2", nm: "知性女", tags: "知性 · 优雅 · 职场", gender: "female", age: "28-32", style: "写实", color: "#8B5CF6",
+    imgUrl: "/avatars/p2.png",
     imgPrompt: "Professional headshot portrait of an elegant Chinese businesswoman aged 28-32, wearing a cream blazer, subtle professional makeup, warm soft smile, looking directly at camera, face occupying 60 percent of frame, soft even studio lighting, shallow depth of field, plain light beige gradient background, shoulders visible, natural skin texture, high resolution, photorealistic" },
   { id: "p3", nm: "活力少女", tags: "青春 · 活泼 · 亲和", gender: "female", age: "20-24", style: "写实", color: "#EC4899",
+    imgUrl: "/avatars/p3.png",
     imgPrompt: "Headshot portrait of an energetic young Chinese woman aged 20-24, wearing a casual white t-shirt, bright cheerful smile showing teeth, youthful fresh look, looking directly at camera, face occupying 60 percent of frame, bright natural lighting, plain soft pink gradient background, shoulders visible, natural skin, high resolution, photorealistic" },
   { id: "p4", nm: "儒雅大叔", tags: "稳重 · 信赖 · 权威", gender: "male", age: "42-48", style: "写实", color: "#14B8A6",
+    imgUrl: "/avatars/p4.png",
     imgPrompt: "Headshot portrait of a distinguished Chinese man aged 42-48, wearing thin-frame glasses and a dark gray turtleneck sweater, warm trustworthy expression with gentle smile, looking directly at camera, face occupying 60 percent of frame, soft warm studio lighting, plain dark gray gradient background, shoulders visible, natural skin texture, high resolution, photorealistic" },
   { id: "p5", nm: "甜美主播", tags: "甜美 · 种草 · 带货", gender: "female", age: "24-28", style: "写实", color: "#F59E0B",
+    imgUrl: "/avatars/p5.png",
     imgPrompt: "Headshot portrait of a cute Chinese female livestreamer aged 24-28, wearing a light pink knit top, sweet charming smile, subtle ring light reflection in eyes, looking directly at camera, face occupying 60 percent of frame, soft ring light illumination, plain soft white background, shoulders visible, light natural makeup, high resolution, photorealistic" },
 ];
 
@@ -204,11 +209,20 @@ const callGemini = async (prompt) => {
 const genImage = async (prompt, size = "1024x1536") => {
   const r = await fetch(API_BASE + "/images/generations", { method: "POST", headers: hdrs,
     body: JSON.stringify({ model: "gpt-image-1", prompt, n: 1, size, quality: "high" }) });
-  const d = await r.json();
-  const item = d.data?.[0];
-  if (item?.url) return item.url;
-  if (item?.b64_json) return "data:image/png;base64," + item.b64_json;
-  throw new Error(d.error?.message || "图像生成失败");
+  if (!r.ok) { const e = await r.text().catch(() => ""); throw new Error("图像生成失败: " + e.slice(0, 200)); }
+  const buf = await r.arrayBuffer();
+  const text = new TextDecoder().decode(buf);
+  try {
+    const d = JSON.parse(text);
+    if (d.error) throw new Error(d.error.message);
+    const item = d.data?.[0];
+    if (item?.url) return item.url;
+    if (item?.b64_json) return "data:image/png;base64," + item.b64_json;
+    throw new Error("未返回图片数据");
+  } catch (e) {
+    if (e.message.includes("图像") || e.message.includes("未返回")) throw e;
+    throw new Error("图像响应解析失败");
+  }
 };
 
 const genTTS = async (text, voice = "nova", speed = 1.0) => {
@@ -216,6 +230,30 @@ const genTTS = async (text, voice = "nova", speed = 1.0) => {
     body: JSON.stringify({ model: "tts-1-hd", input: text, voice, response_format: "mp3", speed }) });
   if (!r.ok) throw new Error("TTS失败: " + (await r.text()).slice(0, 200));
   return URL.createObjectURL(await r.blob());
+};
+
+const genVideoCreate = async (prompt, size = "720x1280", seconds = "8") => {
+  const form = new FormData();
+  form.append("model", "veo-3.1");
+  form.append("prompt", prompt);
+  form.append("size", size);
+  form.append("seconds", seconds);
+  const r = await fetch(API_BASE + "/videos", { method: "POST", headers: { Authorization: "Bearer " + API_KEY }, body: form });
+  if (!r.ok) throw new Error("视频创建失败: " + (await r.text()).slice(0, 200));
+  return r.json();
+};
+
+const genVideoPoll = async (id, onProgress, signal) => {
+  for (let i = 0; i < 120; i++) {
+    if (signal?.aborted) throw new Error("已取消");
+    await new Promise(r => setTimeout(r, 3000));
+    const r = await fetch(API_BASE + "/videos/" + id, { headers: { Authorization: "Bearer " + API_KEY }, signal });
+    const j = await r.json();
+    onProgress?.(j.progress || 0, j.status);
+    if (j.status === "completed") return j.video_url || j.url || j.result_url;
+    if (j.status === "failed") throw new Error(j.error?.message || "视频生成失败");
+  }
+  throw new Error("视频生成超时");
 };
 
 /* ══════════════════════════════════════
@@ -228,9 +266,10 @@ export default function AvatarStudio() {
   });
   const [selId, setSelId] = useState("p1");
   const sel = PRESETS.find(a => a.id === selId) || customs.find(a => a.id === selId) || PRESETS[0];
+  const isPreset = PRESETS.some(a => a.id === selId);
 
   /* ─── State: Generated assets ─── */
-  const [avatarImg, setAvatarImg] = useState(null);
+  const [avatarImg, setAvatarImg] = useState(PRESETS[0].imgUrl);
   const [imgLoading, setImgLoading] = useState(false);
   const [ttsUrl, setTtsUrl] = useState(null);
   const [ttsLoading, setTtsLoading] = useState(false);
@@ -257,9 +296,11 @@ export default function AvatarStudio() {
   const audioRef = useRef(null);
 
   /* ─── State: Video ─── */
-  const [vidStep, setVidStep] = useState(0); // 0=idle, 1=gen, 2=done, -1=info
+  const [vidStep, setVidStep] = useState(0); // 0=idle, 1=gen, 2=done, -1=fail
   const [vidMsg, setVidMsg] = useState("");
   const [vidUrl, setVidUrl] = useState(null);
+  const [vidProgress, setVidProgress] = useState(0);
+  const vidAbortRef = useRef(null);
 
   /* ─── State: Section collapse ─── */
   const [openSec, setOpenSec] = useState(1);
@@ -274,8 +315,10 @@ export default function AvatarStudio() {
   const [cBusy, setCBusy] = useState(false);
   const [cErr, setCErr] = useState("");
 
-  /* ─── Derived: pipeline step ─── */
-  const pStep = !avatarImg ? 1 : !script.trim() ? 2 : !ttsUrl ? 3 : 4;
+  /* ─── Derived: pipeline step (always 1-based for visible steps) ─── */
+  const pStep = isPreset
+    ? (!script.trim() ? 1 : !ttsUrl ? 2 : 3)
+    : (!avatarImg ? 1 : !script.trim() ? 2 : !ttsUrl ? 3 : 4);
 
   /* ─── Persist customs ─── */
   useEffect(() => { localStorage.setItem("avs_custom", JSON.stringify(customs)); }, [customs]);
@@ -304,9 +347,11 @@ export default function AvatarStudio() {
   /* ─── Select avatar ─── */
   const selectAvatar = (id) => {
     setSelId(id);
-    const c = customs.find(a => a.id === id);
-    setAvatarImg(c?.imgUrl || null);
+    const preset = PRESETS.find(a => a.id === id);
+    const custom = customs.find(a => a.id === id);
+    setAvatarImg(preset?.imgUrl || custom?.imgUrl || null);
     resetDownstream(2);
+    setOpenSec(1);
   };
 
   /* ─── Step 1: Generate avatar image ─── */
@@ -353,7 +398,7 @@ export default function AvatarStudio() {
       const result = await callGemini(prompt);
       setScript(result.replace(/^["""「」『』\s]+|["""「」『』\s]+$/g, "").trim());
       resetDownstream(3);
-      setOpenSec(3);
+      setOpenSec(isPreset ? 2 : 3);
     } catch (e) { alert("文案生成失败: " + e.message); }
     finally { setScriptLoading(false); }
   };
@@ -368,7 +413,7 @@ export default function AvatarStudio() {
       setTtsUrl(url);
       setIsPlaying(false); setPlayProg(0);
       setVidUrl(null); setVidStep(0);
-      setOpenSec(4);
+      setOpenSec(isPreset ? 3 : 4);
     } catch (e) { alert("语音生成失败: " + e.message); }
     finally { setTtsLoading(false); }
   };
@@ -376,30 +421,28 @@ export default function AvatarStudio() {
   /* ─── Step 4: Generate video ─── */
   const handleGenVideo = async () => {
     if (!avatarImg || !ttsUrl) return;
-    setVidStep(1); setVidMsg("正在合成口播视频...");
-    // ⚠️ 此处接入数字人视频 API（HeyGen / D-ID / Hedra）
-    // HeyGen: POST https://api.heygen.com/v2/video/generate
-    //   body: { video_inputs: [{ character: { type: "talking_photo", talking_photo_url: avatarImg },
-    //           voice: { type: "audio", audio_url: ttsUrl } }], dimension: { width: 1080, height: 1920 } }
-    // D-ID:   POST https://api.d-id.com/talks
-    //   body: { source_url: avatarImg, script: { type: "audio", audio_url: ttsUrl } }
+    const abort = new AbortController();
+    vidAbortRef.current = abort;
+    setVidStep(1); setVidProgress(0); setVidMsg("正在创建视频任务...");
     try {
-      await new Promise(r => setTimeout(r, 2000));
-      setVidStep(-1);
-      setVidMsg(`数字人口播视频合成需要接入视频驱动 API。
-
-当前已完成全部准备工作：
-  ✅ 数字人形象图片（高质量肖像）
-  ✅ 口播文案（${script.length}字）
-  ✅ TTS语音（${fmtTime(audioDur)}）
-
-接入以下任意 API 即可一键出片：
-  • HeyGen Avatar IV API（推荐，效果最好）
-  • D-ID Talks API（简单易用）
-  • Hedra API（有免费额度）
-
-接入后修改 handleGenVideo 函数即可。`);
-    } catch (e) { setVidStep(-1); setVidMsg("失败: " + e.message); }
+      const size = screen === "竖屏" ? "720x1280" : "1280x720";
+      const durSec = audioDur > 0 ? String(Math.min(12, Math.max(4, Math.ceil(audioDur)))) : "8";
+      const videoPrompt = `${sel.nm || "数字人"} speaking to camera: a person delivering a scripted monologue directly to the viewer, gentle natural head movements, subtle hand gestures, professional studio lighting, ${bgType === "纯色" ? `solid ${bgColor} background` : "blurred modern office background"}, upper body framing, cinematic quality, photorealistic`;
+      const created = await genVideoCreate(videoPrompt, size, durSec);
+      if (!created?.id) throw new Error("未获得视频任务ID");
+      setVidMsg(`视频生成中（ID: ${created.id.slice(-8)}）...`);
+      const url = await genVideoPoll(created.id, (prog, status) => {
+        setVidProgress(prog);
+        const statusMap = { queued: "排队中", in_progress: "生成中" };
+        setVidMsg(`${statusMap[status] || status}... ${prog}%`);
+      }, abort.signal);
+      setVidUrl(url);
+      setVidStep(2); setVidProgress(100);
+      setVidMsg("视频生成完成！");
+    } catch (e) {
+      if (e.name === "AbortError" || e.message === "已取消") { setVidStep(0); setVidMsg(""); }
+      else { setVidStep(-1); setVidMsg("生成失败: " + e.message); }
+    }
   };
 
   /* ─── Create custom avatar ─── */
@@ -420,12 +463,12 @@ export default function AvatarStudio() {
     finally { setCBusy(false); }
   };
 
-  /* ─── Section component ─── */
-  const Section = ({ num, title, status, children }) => {
+  /* ─── Section render helper (not a component, avoids remount) ─── */
+  const renderSection = (num, title, status, children) => {
     const isOpen = openSec === num;
     const st = status === "done" ? "done" : (pStep >= num ? "active" : "idle");
     return (
-      <div className="avs-sec">
+      <div className="avs-sec" key={`sec-${num}`}>
         <div className="avs-sec-hd" onClick={() => setOpenSec(isOpen ? 0 : num)}>
           <div className={`avs-sec-num ${st}`}>{st === "done" ? <I.Check /> : num}</div>
           <div className="avs-sec-title">{title}</div>
@@ -438,7 +481,10 @@ export default function AvatarStudio() {
     );
   };
 
-  const stepLabels = ["生成形象", "编写文案", "语音合成", "生成视频"];
+  const allStepLabels = ["生成形象", "编写文案", "语音合成", "生成视频"];
+  const stepLabels = isPreset ? allStepLabels.slice(1) : allStepLabels;
+  // Section numbering: preset → 1=口播 2=语音 3=视频; custom → 1=形象 2=口播 3=语音 4=视频
+  const S = isPreset ? 0 : 1; // offset: section for 口播 = 1+S
 
   /* ═══ RENDER ═══ */
   return (
@@ -457,10 +503,8 @@ export default function AvatarStudio() {
             {PRESETS.map(av => (
               <div key={av.id} className={`avs-ac ${selId === av.id ? "on" : ""}`} onClick={() => selectAvatar(av.id)}>
                 <div className="avs-ac-img">
-                  <div style={{ width: "100%", height: "100%", background: `linear-gradient(135deg, ${av.color}20, ${av.color}40)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <span style={{ fontSize: 40, fontWeight: 900, color: av.color, opacity: 0.4 }}>{av.nm[0]}</span>
-                  </div>
-                  <span className="avs-ac-badge" style={{ background: av.color }}>AI生成</span>
+                  <img src={av.imgUrl} alt={av.nm} />
+                  <span className="avs-ac-badge" style={{ background: av.color }}>预设</span>
                 </div>
                 <div className="avs-ac-info"><div className="avs-ac-nm">{av.nm}</div><div className="avs-ac-tags">{av.tags}</div></div>
               </div>
@@ -490,7 +534,8 @@ export default function AvatarStudio() {
         <div className="avs-c">
           <div className="avs-steps">
             {stepLabels.map((s, i) => {
-              const n = i + 1; const done = pStep > n; const on = pStep === n;
+              const n = i + 1;
+              const done = pStep > n; const on = pStep === n;
               return (<span key={i} style={{ display: "flex", alignItems: "center" }}>
                 {i > 0 && <span className="avs-arr">→</span>}
                 <span className={`avs-st ${done ? "done" : ""} ${on ? "on" : ""}`} onClick={() => setOpenSec(n)}>
@@ -503,11 +548,12 @@ export default function AvatarStudio() {
             <div className={`avs-ph ${screen === "横屏" ? "land" : ""}`}>
               <div className="avs-ph-in">
                 {screen === "竖屏" && <div className="avs-ph-notch" />}
-                {vidUrl ? <video src={vidUrl} loop style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                {vidUrl ? <video src={vidUrl} controls loop style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   : avatarImg ? <img src={avatarImg} alt="avatar" />
                   : <div className="avs-empty"><I.Camera /><span>选择形象并点击「生成形象图片」</span></div>}
                 {imgLoading && <div className="avs-loading"><span className="avs-spin" /><span style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>AI 生成形象中...</span></div>}
-                {avatarImg && ttsUrl && !vidUrl && !imgLoading && <div className="avs-playbtn" onClick={togglePlay}>{isPlaying ? <I.Pause /> : <I.Play />}</div>}
+                {vidStep === 1 && !imgLoading && <div className="avs-loading"><span className="avs-spin" /><span style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>视频生成中 {vidProgress}%</span></div>}
+                {avatarImg && ttsUrl && !vidUrl && !imgLoading && vidStep !== 1 && <div className="avs-playbtn" onClick={togglePlay}>{isPlaying ? <I.Pause /> : <I.Play />}</div>}
                 <div className="avs-ph-bar" />
               </div>
             </div>
@@ -521,8 +567,8 @@ export default function AvatarStudio() {
             <div className="avs-r-d">按步骤配置，生成数字人口播视频</div>
           </div>
           <div className="avs-r-sc">
-            {/* ─── Section 1: 生成形象 ─── */}
-            <Section num={1} title="生成数字人形象" status={avatarImg ? "done" : "ready"}>
+            {/* ─── 生成形象（仅自定义角色需要） ─── */}
+            {!isPreset && renderSection(1, "生成数字人形象", avatarImg ? "done" : "ready", <>
               <div className="avs-hint"><I.Info /><span>数字人源图要求：正面面部占画面 60%，光线均匀，表情自然，无遮挡，简洁背景。AI 会自动按此标准生成。</span></div>
               <div className="avs-fg">
                 <div className="avs-fl">当前形象</div>
@@ -538,10 +584,17 @@ export default function AvatarStudio() {
               <button className="avs-btn purple" onClick={() => handleGenImage()} disabled={imgLoading}>
                 {imgLoading ? <><span className="avs-spin-sm" /> 生成中（约15-30秒）...</> : <><I.Image /> {avatarImg ? "重新生成形象" : "生成形象图片"}</>}
               </button>
-            </Section>
+            </>)}
 
-            {/* ─── Section 2: 口播内容 ─── */}
-            <Section num={2} title="口播内容配置" status={script.trim() ? "done" : (avatarImg ? "ready" : undefined)}>
+            {/* ─── 口播内容 ─── */}
+            {renderSection(1+S, "口播内容配置", script.trim() ? "done" : (avatarImg ? "ready" : undefined), <>
+              {isPreset && <div className="avs-fg">
+                <div className="avs-fl">屏幕比例</div>
+                <div className="avs-scr-btns">
+                  <button className={`avs-scr ${screen === "竖屏" ? "on" : ""}`} onClick={() => setScreen("竖屏")}>竖屏 9:16</button>
+                  <button className={`avs-scr ${screen === "横屏" ? "on" : ""}`} onClick={() => setScreen("横屏")}>横屏 16:9</button>
+                </div>
+              </div>}
               <div className="avs-fg">
                 <div className="avs-fl">视频主题 <span className="req">*</span></div>
                 <input className="avs-inp" value={theme} onChange={e => setTheme(e.target.value)} placeholder="如：2024护肤新趋势、新品发布、行业分析..." />
@@ -589,10 +642,10 @@ export default function AvatarStudio() {
                   <span>{script.length} 字</span>
                 </div>
               </div>
-            </Section>
+            </>)}
 
-            {/* ─── Section 3: 语音合成 ─── */}
-            <Section num={3} title="语音合成" status={ttsUrl ? "done" : (script.trim() ? "ready" : undefined)}>
+            {/* ─── 语音合成 ─── */}
+            {renderSection(2+S, "语音合成", ttsUrl ? "done" : (script.trim() ? "ready" : undefined), <>
               <div className="avs-fg">
                 <div className="avs-fl">选择音色</div>
                 <div className="avs-vg">
@@ -622,10 +675,9 @@ export default function AvatarStudio() {
                   <div className="avs-ap-dl" title="下载音频" onClick={() => { const a = document.createElement("a"); a.href = ttsUrl; a.download = `tts_${sel.nm}.mp3`; a.click(); }}><I.Download /></div>
                 </div>
               )}
-            </Section>
+            </>)}
 
-            {/* ─── Section 4: 生成视频 ─── */}
-            <Section num={4} title="生成口播视频" status={vidUrl ? "done" : (ttsUrl ? "ready" : undefined)}>
+            {renderSection(3+S, "生成口播视频", vidUrl ? "done" : (ttsUrl ? "ready" : undefined), <>
               <div className="avs-hint"><I.Info /><span>将数字人肖像 + 语音合成为口播视频。AI 自动驱动面部表情、唇形同步和自然头部动作。</span></div>
               <div className="avs-fg">
                 <div className="avs-fl">背景设置</div>
@@ -652,24 +704,36 @@ export default function AvatarStudio() {
                   <span>背景：<b style={{ color: "var(--t1)" }}>{bgType}</b></span>
                 </div>
               </div>
-              <button className="avs-btn green" onClick={handleGenVideo} disabled={!avatarImg || !ttsUrl || vidStep === 1}>
-                {vidStep === 1 ? <><span className="avs-spin-sm" /> 视频合成中...</> : <><I.Zap /> 合成口播视频</>}
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="avs-btn green" style={{ flex: 1 }} onClick={handleGenVideo} disabled={!avatarImg || !ttsUrl || vidStep === 1}>
+                  {vidStep === 1 ? <><span className="avs-spin-sm" /> 视频生成中...</> : <><I.Zap /> 生成口播视频</>}
+                </button>
+                {vidStep === 1 && <button className="avs-btn ghost" style={{ width: "auto", padding: "0 14px", marginTop: 0 }} onClick={() => vidAbortRef.current?.abort()}>取消</button>}
+              </div>
               {vidStep !== 0 && (
-                <div className="avs-status" style={{ borderColor: vidStep === -1 ? "#FEF3C7" : vidStep === 2 ? "#BBF7D0" : "var(--bl)" }}>
+                <div className="avs-status" style={{ borderColor: vidStep === -1 ? "#FECACA" : vidStep === 2 ? "#BBF7D0" : "var(--bl)" }}>
                   <div className="avs-status-hd">
                     {vidStep === 1 && <span className="avs-spin-sm" style={{ borderColor: "#DBEAFE", borderTopColor: "#3B82F6" }} />}
                     {vidStep === 2 && <div style={{ width: 14, height: 14, borderRadius: "50%", background: "#10B981", display: "flex", alignItems: "center", justifyContent: "center" }}><I.Check /></div>}
-                    {vidStep === -1 && <div style={{ width: 14, height: 14, borderRadius: "50%", background: "#F59E0B", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 800 }}>i</div>}
-                    <span style={{ fontSize: 12, fontWeight: 600, color: vidStep === -1 ? "#92400E" : vidStep === 2 ? "#16A34A" : "#1E40AF" }}>
-                      {vidStep === 1 ? "合成中..." : vidStep === 2 ? "视频已生成" : "接入提示"}
+                    {vidStep === -1 && <div style={{ width: 14, height: 14, borderRadius: "50%", background: "#EF4444", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 800 }}>!</div>}
+                    <span style={{ fontSize: 12, fontWeight: 600, color: vidStep === -1 ? "#DC2626" : vidStep === 2 ? "#16A34A" : "#1E40AF" }}>
+                      {vidStep === 1 ? "生成中..." : vidStep === 2 ? "视频已生成" : "生成失败"}
                     </span>
                   </div>
-                  {vidStep === 1 && <div className="avs-status-bar"><div className="avs-status-fill" style={{ width: "60%", background: "linear-gradient(90deg,#3B82F6,#6366F1)" }} /></div>}
-                  {vidMsg && <div className="avs-status-msg" style={{ color: vidStep === -1 ? "#78350F" : "#64748B" }}>{vidMsg}</div>}
+                  {vidStep === 1 && <div className="avs-status-bar"><div className="avs-status-fill" style={{ width: vidProgress + "%", background: "linear-gradient(90deg,#3B82F6,#6366F1)", transition: "width .5s" }} /></div>}
+                  {vidMsg && <div className="avs-status-msg" style={{ color: vidStep === -1 ? "#DC2626" : "#64748B" }}>{vidMsg}</div>}
+                  {vidStep === 2 && vidUrl && (
+                    <div style={{ marginTop: 8 }}>
+                      <video src={vidUrl} controls style={{ width: "100%", borderRadius: 8, maxHeight: 260 }} />
+                      <a href={vidUrl} target="_blank" rel="noreferrer" download style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 8, fontSize: 12, color: "var(--p)", fontWeight: 600, textDecoration: "none" }}>
+                        <I.Download /> 下载视频
+                      </a>
+                    </div>
+                  )}
+                  {vidStep === -1 && <button className="avs-btn ghost" style={{ marginTop: 8, fontSize: 11 }} onClick={() => { setVidStep(0); setVidMsg(""); }}>重试</button>}
                 </div>
               )}
-            </Section>
+            </>)}
           </div>
         </div>
       </div>
