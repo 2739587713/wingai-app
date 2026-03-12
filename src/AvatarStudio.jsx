@@ -121,8 +121,8 @@ const STYLES = `
 .avs-ph.land .avs-ph-notch{display:none}
 .avs-ph-in img,.avs-ph-in video{width:100%;height:100%;object-fit:cover}
 .avs-ph-bar{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:100px;height:4px;background:rgba(255,255,255,.15);border-radius:2px;z-index:3}
-.avs-playbtn{position:absolute;width:56px;height:56px;border-radius:50%;background:rgba(124,58,237,.85);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s;z-index:3;backdrop-filter:blur(4px)}
-.avs-playbtn:hover{transform:scale(1.08);background:rgba(124,58,237,.95)}
+.avs-playbtn{position:absolute;bottom:18px;right:12px;width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,.45);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s;z-index:3;backdrop-filter:blur(4px)}
+.avs-playbtn:hover{transform:scale(1.08);background:rgba(0,0,0,.65)}
 .avs-empty{display:flex;flex-direction:column;align-items:center;gap:8px;color:rgba(255,255,255,.25);font-size:12px}
 .avs-loading{position:absolute;inset:0;background:rgba(0,0,0,.65);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;z-index:5}
 .avs-spin{display:inline-block;width:24px;height:24px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
@@ -269,6 +269,17 @@ const klingPoll = async (taskId, pollPath, onProgress, signal) => {
     if (st === "failed") throw new Error(j.data?.task_status_msg || "生成失败");
   }
   throw new Error("生成超时");
+};
+
+const klingExtend = async (videoUrl, prompt = "Continue talking naturally") => {
+  const r = await fetch(BLT_BASE + "/kling/v1/videos/video-extend", {
+    method: "POST", headers: bltHdrs,
+    body: JSON.stringify({ model_name: "kling-v1", video_url: videoUrl, prompt, duration: "5" }),
+  });
+  if (!r.ok) throw new Error("视频续写失败: " + (await r.text()).slice(0, 200));
+  const j = await r.json();
+  if (j.code !== 0) throw new Error(j.message || "续写创建失败");
+  return j.data.task_id;
 };
 
 const klingLipSync = async (videoUrl, audioUrl) => {
@@ -503,36 +514,35 @@ export default function AvatarStudio() {
       const ttsBlob = await (await fetch(ttsUrl)).blob();
       const audioPublicUrl = await uploadToTmp(ttsBlob, "tts.mp3");
 
-      // 3. Create base video with Kling image2video
+      // 3. Create 10s base video with Kling image2video
       const aspect = screen === "竖屏" ? "9:16" : "16:9";
-      const dur = audioDur > 0 ? String(Math.min(10, Math.max(5, Math.ceil(audioDur)))) : "5";
       const bgDesc = bgType === "纯色" ? "plain simple background" : bgType === "办公室" ? "modern office" : bgType === "直播间" ? "livestream studio" : "blurred background";
       const scriptHint = script.slice(0, 60).replace(/["\n]/g, " ");
       const prompt = `This person is talking directly to camera, presenting about "${scriptHint}", natural head movements, slight expressions changes, ${bgDesc}, casual Douyin vlog style`;
 
       setVidMsg("正在创建基础视频...");
-      const vid1TaskId = await klingCreate(imageUrl, prompt, aspect, dur);
+      const vid1TaskId = await klingCreate(imageUrl, prompt, aspect, "10");
       setVidMsg("基础视频生成中（约2-3分钟）...");
       const baseVideoUrl = await klingPoll(vid1TaskId, "/kling/v1/videos/image2video", (prog, status) => {
-        setVidProgress(Math.round(prog * 0.6)); // 0-60%
-        const m = { submitted: "已提交", processing: "基础视频生成中", succeed: "基础视频完成" };
-        setVidMsg(`${m[status] || status}... ${Math.round(prog * 0.6)}%`);
+        const p = Math.round(prog * 0.5);
+        setVidProgress(p);
+        setVidMsg(`基础视频${status === "processing" ? "生成中" : status === "submitted" ? "已提交" : "完成"}... ${p}%`);
       }, abort.signal);
 
-      // 4. Apply lip-sync with TTS audio
-      setVidMsg("正在创建对口型任务...");
-      setVidProgress(65);
+      // 4. Apply lip-sync with TTS audio (video loops, audio plays full)
+      setVidMsg("正在对口型...");
+      setVidProgress(55);
       const lsTaskId = await klingLipSync(baseVideoUrl, audioPublicUrl);
       setVidMsg("对口型生成中（约2分钟）...");
       const finalUrl = await klingPoll(lsTaskId, "/kling/v1/videos/lip-sync", (prog, status) => {
-        setVidProgress(65 + Math.round(prog * 0.35)); // 65-100%
-        const m = { submitted: "对口型已提交", processing: "对口型生成中", succeed: "完成" };
-        setVidMsg(`${m[status] || status}... ${65 + Math.round(prog * 0.35)}%`);
+        const p = 55 + Math.round(prog * 0.45);
+        setVidProgress(p);
+        setVidMsg(`对口型${status === "processing" ? "生成中" : "等待"}... ${p}%`);
       }, abort.signal);
 
       setVidUrl(finalUrl);
       setVidStep(2); setVidProgress(100);
-      setVidMsg("视频生成完成！嘴型已与语音同步。");
+      setVidMsg("视频生成完成！点击预览播放完整口播。");
     } catch (e) {
       if (e.name === "AbortError" || e.message === "已取消") { setVidStep(0); setVidMsg(""); }
       else { setVidStep(-1); setVidMsg("生成失败: " + e.message); }
@@ -568,19 +578,26 @@ export default function AvatarStudio() {
     finally { setCBusy(false); }
   };
 
-  /* ─── Play lip-synced video (audio already baked in) ─── */
+  /* ─── Play: loop lip-synced video + full TTS audio ─── */
   const handlePlayCombo = () => {
     const v = vidRef.current;
     if (!v) return;
     if (comboPlaying) {
-      v.pause();
+      v.pause(); v.muted = true;
+      if (comboAudioRef.current) comboAudioRef.current.pause();
       setComboPlaying(false);
-    } else {
-      v.currentTime = 0;
-      v.play();
-      setComboPlaying(true);
-      v.onended = () => setComboPlaying(false);
+      return;
     }
+    v.currentTime = 0; v.muted = true; v.loop = true;
+    v.play();
+    if (ttsUrl) {
+      if (!comboAudioRef.current) comboAudioRef.current = new Audio();
+      comboAudioRef.current.src = ttsUrl;
+      comboAudioRef.current.currentTime = 0;
+      comboAudioRef.current.play();
+      comboAudioRef.current.onended = () => { v.pause(); v.muted = true; setComboPlaying(false); };
+    }
+    setComboPlaying(true);
   };
 
   /* ─── Section render helper (not a component, avoids remount) ─── */
@@ -667,7 +684,7 @@ export default function AvatarStudio() {
             <div className={`avs-ph ${screen === "横屏" ? "land" : ""}`}>
               <div className="avs-ph-in">
                 {screen === "竖屏" && <div className="avs-ph-notch" />}
-                {vidUrl ? <video ref={vidRef} src={vidUrl} loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                {vidUrl ? <video ref={vidRef} src={vidUrl} muted loop playsInline onClick={handlePlayCombo} style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "pointer" }} />
                   : avatarImg ? <img src={avatarImg} alt="avatar" />
                   : <div className="avs-empty"><I.Camera /><span>请在左侧选择或上传数字人形象</span></div>}
                 {imgLoading && <div className="avs-loading"><span className="avs-spin" /><span style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>AI 生成形象中...</span></div>}
