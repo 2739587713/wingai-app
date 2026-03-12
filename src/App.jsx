@@ -242,25 +242,31 @@ export default function App(){
 
   const openModal=(m,lt=null)=>{setModal(true);setMStep(lt?2:m?2:0);setMMode(m||"quick");setSelTmpl(TEMPLATES[0]);setLibSelTmpl(lt);};
   const TH_KEY="k40dDp4s0V2pqHGuTJC15k36ahixSsFavT3U7EyjUv29lHOfJWWZUAqRMw==";
-  const thGet=async(ep,params)=>{const u=new URL("/tikhub-proxy"+ep,location.origin);if(params)Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,v));for(let i=0;i<3;i++){try{const r=await fetch(u,{headers:{"Authorization":"Bearer "+TH_KEY}});if(r.ok)return await r.json();}catch{}if(i<2)await new Promise(r=>setTimeout(r,2000*(i+1)));}return null;};
-  const thPost=async(ep,body)=>{for(let i=0;i<3;i++){try{const r=await fetch("/tikhub-proxy"+ep,{method:"POST",headers:{"Authorization":"Bearer "+TH_KEY,"Content-Type":"application/json"},body:JSON.stringify(body)});if(r.ok)return await r.json();}catch{}if(i<2)await new Promise(r=>setTimeout(r,2000*(i+1)));}return null;};
+  const TH_H={"Authorization":"Bearer "+TH_KEY,"Content-Type":"application/json"};
+  const thGet=async(ep,params)=>{const u=new URL("/tikhub-proxy"+ep,location.origin);if(params)Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,v));for(let i=0;i<3;i++){try{const r=await fetch(u,{headers:TH_H});const j=await r.json();console.log("[thGet]",ep.split("/").pop(),r.status,j?.code,j?.message||"");if(r.ok)return j;}catch(e){console.log("[thGet] err",e.message);}if(i<2)await new Promise(r=>setTimeout(r,2000*(i+1)));}return null;};
+  const thPost=async(ep,body)=>{for(let i=0;i<3;i++){try{const r=await fetch("/tikhub-proxy"+ep,{method:"POST",headers:TH_H,body:JSON.stringify(body)});const j=await r.json();if(r.ok)return j;}catch(e){console.log("[thPost] err",e.message);}if(i<2)await new Promise(r=>setTimeout(r,2000*(i+1)));}return null;};
   const extSteps=["解析链接","获取视频列表","获取视频详情","AI深度分析","完成"];
   const [extStepIdx,setExtStepIdx]=useState(-1);
   const [extInfo,setExtInfo]=useState("");
   const runExtract=async()=>{
     if(!extLink.trim()||!extName.trim()){alert("请填写博主链接和昵称");return;}
     setExtBusy(true);setExtStepIdx(0);setExtStep("");setExtInfo("");
+    let dbg=[];
     try{
       const urlMatch=extLink.match(/https?:\/\/\S+/);let rawUrl=urlMatch?urlMatch[0].replace(/[.,，。]+$/,""):extLink.trim();
+      dbg.push("URL: "+rawUrl);setExtInfo("链接: "+rawUrl.slice(0,50));
       let secUid="";
       const uidMatch=rawUrl.match(/\/user\/([A-Za-z0-9_-]{20,})/);
-      if(uidMatch){secUid=uidMatch[1];}
+      if(uidMatch){secUid=uidMatch[1];dbg.push("直接解析sec_uid成功");}
       else{
         setExtInfo("展开短链接...");
-        try{const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),15000);const er=await fetch("/expand-url?url="+encodeURIComponent(rawUrl),{signal:ac.signal});clearTimeout(tm);const ej=await er.json();console.log("[extract] expand-url result:",ej.url);if(ej.url){rawUrl=ej.url;const m2=rawUrl.match(/\/user\/([A-Za-z0-9_-]{20,})/);if(m2)secUid=m2[1];if(!secUid&&ej.body){const m3=ej.body.match(/\/user\/([A-Za-z0-9_-]{20,})/);if(m3)secUid=m3[1];}}}catch(ex){console.log("[extract] expand-url failed:",ex.message);}
-        if(!secUid){setExtInfo("通过API解析...");for(const ep of["/api/v1/douyin/web/fetch_user_profile_by_url","/api/v1/douyin/app/v3/fetch_user_profile_by_url"]){setExtInfo("API解析中... "+ep.split("/").pop());const d=await thGet(ep,{url:rawUrl});console.log("[extract] TikHub",ep.split("/").pop(),"result:",d?Object.keys(d):"null");if(d){for(const path of[["data","user","sec_uid"],["data","sec_uid"],["data","user_info","sec_uid"]]){try{let v=d;for(const k of path)v=v[k];if(v){secUid=v;break;}}catch{}}if(secUid)break;}}}
+        try{const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),20000);const er=await fetch("/expand-url?url="+encodeURIComponent(rawUrl),{signal:ac.signal});clearTimeout(tm);const etxt=await er.text();dbg.push("展开响应["+er.status+"]: "+etxt.slice(0,150));let ej;try{ej=JSON.parse(etxt);}catch{ej={};};if(ej.url){rawUrl=ej.url;const m2=rawUrl.match(/\/user\/([A-Za-z0-9_-]{20,})/);if(m2){secUid=m2[1];dbg.push("从展开URL解析sec_uid成功");}if(!secUid&&ej.body){const m3=ej.body.match(/\/user\/([A-Za-z0-9_-]{20,})/);if(m3){secUid=m3[1];dbg.push("从body解析sec_uid成功");}const m4=ej.body.match(/sec_uid['":\s]+([A-Za-z0-9_-]{20,})/);if(!secUid&&m4){secUid=m4[1];dbg.push("从body字段解析sec_uid成功");}}}}catch(ex){dbg.push("展开失败: "+ex.message);}
+        if(!secUid){setExtInfo("通过TikHub API解析...");
+          const findUid=(obj)=>{if(!obj||typeof obj!=="object")return"";if(typeof obj.sec_uid==="string"&&obj.sec_uid.length>15)return obj.sec_uid;for(const v of Object.values(obj)){const r=findUid(v);if(r)return r;}return"";};
+          for(const ep of["/api/v1/douyin/web/fetch_user_profile_by_url","/api/v1/douyin/app/v3/fetch_user_profile_by_url"]){const epName=ep.split("/").pop();setExtInfo("API: "+epName);
+            try{const u=new URL("/tikhub-proxy"+ep,location.origin);u.searchParams.set("url",rawUrl);const r=await fetch(u,{headers:TH_H});const txt=await r.text();dbg.push(epName+" ["+r.status+"]: "+txt.slice(0,200));if(r.ok){try{const d=JSON.parse(txt);secUid=findUid(d);if(secUid){dbg.push("sec_uid: "+secUid);break;}}catch{dbg.push("JSON解析失败");}}}catch(e){dbg.push(epName+" 请求失败: "+e.message);}}}
       }
-      if(!secUid){setExtStep("err:无法解析博主链接，请确认链接正确");setExtBusy(false);return;}
+      if(!secUid){setExtStep("err:无法解析博主链接\n"+dbg.join("\n"));setExtBusy(false);return;}
       setExtStepIdx(1);setExtInfo("");
       let videoIds=[];let cursor=0;
       for(const ep of["/api/v1/douyin/web/fetch_user_post_videos","/api/v1/douyin/app/v3/fetch_user_post_videos"]){
@@ -1862,7 +1868,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                 {extBusy&&<span style={{display:"inline-block",width:12,height:12,border:"2px solid #93C5FD",borderTopColor:"#3B82F6",borderRadius:"50%",animation:"spin 1s linear infinite",flexShrink:0}}/>}
                 {extInfo}
               </div>}
-              {extStep.startsWith("err:")&&<div style={{fontSize:12,color:"#DC2626",display:"flex",alignItems:"center",gap:6}}>{extStep.slice(4)}</div>}
+              {extStep.startsWith("err:")&&<div style={{fontSize:11,color:"#DC2626",whiteSpace:"pre-wrap",lineHeight:1.6}}>{extStep.slice(4)}</div>}
               {extStepIdx===4&&<div style={{fontSize:12,color:"#10B981",fontWeight:600,display:"flex",alignItems:"center",gap:6,marginTop:4}}>{extInfo}</div>}
             </div>}
             <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:14}}>
