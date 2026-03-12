@@ -170,6 +170,14 @@ export default function App(){
   const [itTitle,setItTitle]=useState("");
   const [itStyle,setItStyle]=useState("专业严谨");
   const [itContent,setItContent]=useState("");
+  // xhs generator
+  const [xhsProd,setXhsProd]=useState("");
+  const [xhsAudience,setXhsAudience]=useState("");
+  const [xhsStyle,setXhsStyle]=useState("干货教程");
+  const [xhsSelling,setXhsSelling]=useState("");
+  const [xhsBusy,setXhsBusy]=useState(false);
+  const [xhsNotes,setXhsNotes]=useState([]);
+  const [xhsSel,setXhsSel]=useState(0);
   // schedule page
   const [schMonth,setSchMonth]=useState(new Date().getMonth());
   const [schYear,setSchYear]=useState(new Date().getFullYear());
@@ -303,6 +311,70 @@ export default function App(){
     });
     const data=await resp.json();
     return data.choices?.[0]?.message?.content||"生成失败，请重试";
+  };
+  const generateXhs=async()=>{
+    if(!xhsProd.trim()){alert("请填写产品/服务名称");return;}
+    setXhsBusy(true);setXhsNotes([]);setXhsSel(0);
+    const styleDescs={"干货教程":"专业有条理、步骤清晰、有实操价值，像资深从业者分享经验","痛点共鸣":"引起共鸣、解决问题、情感连接、理解用户痛苦并提供解决方案","案例展示":"真实案例、数据说话、前后对比、有理有据建立信任","经验分享":"个人视角、真实经历、接地气、像朋友聊天不做作","避坑指南":"常见错误、血泪教训、实用建议、过来人的忠告"};
+    const allStyles=["干货教程","痛点共鸣","案例展示","经验分享","避坑指南"];
+    const orderedStyles=[xhsStyle,...allStyles.filter(s=>s!==xhsStyle)].slice(0,3);
+    const prompt=`你是一位精通小红书的爆款内容创作者。请为以下产品/服务创作3篇不同风格的小红书笔记。
+
+【产品/服务信息】
+名称：${xhsProd}
+${xhsAudience?"目标受众："+xhsAudience:""}
+${xhsSelling?"核心卖点："+xhsSelling:""}
+
+【3篇笔记的风格要求】
+1. ${orderedStyles[0]}：${styleDescs[orderedStyles[0]]}
+2. ${orderedStyles[1]}：${styleDescs[orderedStyles[1]]}
+3. ${orderedStyles[2]}：${styleDescs[orderedStyles[2]]}
+
+【小红书爆款特征——必须严格遵守】
+1. 标题：数字+痛点+好奇心+emoji，不超过20字，每篇给3个备选标题
+2. 开头：用痛点/数据/问题/反常识抓注意力，前两句决定用户是否继续读
+3. 正文：500-800字，真实感强，像朋友分享而非广告，段落清晰
+4. emoji：每段开头用emoji区分段落层次，增加阅读趣味
+5. 结尾：自然引导互动（评论/收藏/私信），不要硬广
+6. 标签：每篇5-8个相关话题标签，用#开头
+7. 信任建立：用具体数据和案例，先给价值再引导转化
+8. 语气：亲切专业但不生硬，像一个有经验的朋友在分享
+
+【转化设计】
+- 软植入产品/服务价值，不要硬广
+- 先给价值，再自然引导咨询
+- 用"评论区问我""私信我"而非留联系方式
+- 建立专业人设和信任感
+- 适当使用"收藏起来慢慢看""转发给需要的朋友"引导收藏转发
+
+严格按以下JSON格式输出，不要有任何JSON之外的文字：
+{
+  "notes":[
+    {
+      "style":"风格名称",
+      "titles":["标题1（带emoji，不超过20字）","标题2","标题3"],
+      "content":"正文内容（500-800字，用\\n换行，包含emoji分段）",
+      "hashtags":["#标签1","#标签2","#标签3","#标签4","#标签5"],
+      "interaction_guide":"互动引导语（引导评论/收藏/私信）",
+      "cover_suggestion":"封面设计建议（配色/文字/构图）",
+      "best_post_time":"最佳发布时间建议"
+    }
+  ]
+}`;
+    try{
+      const raw=await callGemini(prompt);
+      const m=raw.match(/\{[\s\S]*\}/);
+      if(!m)throw new Error("返回格式异常");
+      const parsed=JSON.parse(m[0]);
+      const notes=parsed.notes||[];
+      if(!notes.length)throw new Error("未生成笔记");
+      setXhsNotes(notes);
+    }catch(e){
+      console.error("XHS generate error:",e);
+      alert("生成失败，请重试");
+    }finally{
+      setXhsBusy(false);
+    }
   };
   const startCreate=async()=>{
     setModal(false);setPg("create");setCs("ai-generating");setAiScripts([]);
@@ -1090,6 +1162,27 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
 .it-pv-skel-line{height:10px;background:var(--s3);border-radius:5px;margin-bottom:8px}
 .it-pv-skel-line.w60{width:60%}.it-pv-skel-line.w80{width:80%}.it-pv-skel-line.w40{width:40%}
 .it-pv-skel-block{height:80px;background:var(--s3);border-radius:10px;margin:8px 0}
+/* xhs preview */
+.xhs-tabs{display:flex;gap:8px;margin-bottom:14px}
+.xhs-tab{padding:8px 18px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1.5px solid var(--bl);background:var(--s);color:var(--t2);font-family:inherit;transition:var(--tr)}.xhs-tab:hover{border-color:var(--pl);color:var(--p)}.xhs-tab.on{background:var(--p);color:#fff;border-color:var(--p)}
+.xhs-card{background:var(--s);border-radius:16px;border:1px solid var(--bl);overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.04)}
+.xhs-card-hd{padding:16px 20px;border-bottom:1px solid var(--bl);display:flex;align-items:center;gap:8px}
+.xhs-card-hd-ic{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#FF2442,#FF6680);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700}
+.xhs-card-hd-t{font-size:14px;font-weight:700;color:var(--t1)}.xhs-card-hd-d{font-size:11px;color:var(--t3)}
+.xhs-sec{padding:16px 20px;border-bottom:1px solid var(--bl)}
+.xhs-sec:last-child{border-bottom:none}
+.xhs-sec-t{font-size:12px;font-weight:700;color:var(--t2);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.xhs-title-opt{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--bl);margin-bottom:8px;cursor:pointer;transition:var(--tr);font-size:13px;color:var(--t1)}
+.xhs-title-opt:hover{border-color:var(--pl);background:var(--s2)}.xhs-title-opt:hover svg{color:var(--p)}
+.xhs-title-opt svg{color:var(--t3);flex-shrink:0}
+.xhs-title-n{width:22px;height:22px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--t3);flex-shrink:0}
+.xhs-content{font-size:13px;line-height:1.85;color:var(--t1);white-space:pre-wrap;word-break:break-word}
+.xhs-tags{display:flex;flex-wrap:wrap;gap:6px}
+.xhs-tag{padding:4px 12px;border-radius:14px;background:#FFF0F1;color:#FF2442;font-size:11px;font-weight:500}
+.xhs-meta{font-size:12px;color:var(--t2);line-height:1.7;padding:10px 14px;background:var(--s2);border-radius:10px;border:1px solid var(--bl)}
+.xhs-copy-all{width:100%;padding:12px;border-radius:0 0 16px 16px;border:none;border-top:1px solid var(--bl);background:var(--s);color:var(--p);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;transition:var(--tr)}.xhs-copy-all:hover{background:var(--pbg)}
+.xhs-copy-btn{font-size:11px;color:var(--p);font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;background:none;border:none;font-family:inherit;padding:0}.xhs-copy-btn:hover{opacity:.7}
+.xhs-style-chips{display:flex;flex-wrap:wrap;gap:8px}
 /* schedule page */
 .sch-wrap{display:flex;height:calc(100vh - 52px);overflow:hidden}
 .sch-main{flex:1;display:flex;flex-direction:column;overflow:hidden}
@@ -1399,6 +1492,50 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                 </div>
               </div>
 
+              {itPlat==="小红书"?<>
+              <div className="it-fg">
+                <div className="it-fg-l">产品/服务名称 <span style={{color:"#EF4444"}}>*</span></div>
+                <input className="it-inp" value={xhsProd} onChange={e=>setXhsProd(e.target.value)} placeholder="如：海外社媒代运营、美白面霜、在线英语课..."/>
+              </div>
+
+              <div className="it-fg">
+                <div className="it-fg-l">目标受众 <span className="it-fg-ct">选填</span></div>
+                <input className="it-inp" value={xhsAudience} onChange={e=>setXhsAudience(e.target.value)} placeholder="如：想出海的品牌方、25-35岁女性、大学生..."/>
+              </div>
+
+              <div className="it-fg">
+                <div className="it-fg-l">笔记风格</div>
+                <div className="xhs-style-chips">
+                  {["干货教程","痛点共鸣","案例展示","经验分享","避坑指南"].map(s=>(
+                    <button key={s} className={`ch ${xhsStyle===s?"on":""}`} onClick={()=>setXhsStyle(s)}>{s}</button>
+                  ))}
+                </div>
+                <div style={{fontSize:10,color:"var(--t3)",marginTop:6}}>
+                  {xhsStyle==="干货教程"&&"专业有条理，步骤清晰，有实操价值"}
+                  {xhsStyle==="痛点共鸣"&&"引起共鸣，解决问题，情感连接"}
+                  {xhsStyle==="案例展示"&&"真实案例，数据说话，前后对比"}
+                  {xhsStyle==="经验分享"&&"个人视角，真实经历，接地气"}
+                  {xhsStyle==="避坑指南"&&"常见错误，血泪教训，实用建议"}
+                </div>
+              </div>
+
+              <div className="it-fg">
+                <div className="it-fg-l">核心卖点 <span className="it-fg-ct">选填，多个卖点用逗号分隔</span></div>
+                <textarea className="it-inp" rows={3} value={xhsSelling} onChange={e=>setXhsSelling(e.target.value)} placeholder="如：3年+经验、数据驱动增长、中英双语服务、按效果付费..." style={{resize:"vertical"}}/>
+              </div>
+
+              <button className="it-gen-btn" onClick={generateXhs} disabled={xhsBusy} style={xhsBusy?{opacity:.7,cursor:"wait"}:{}}>
+                {xhsBusy?<><I.Refresh style={{animation:"spin 1s linear infinite"}}/> AI 生成中，约需30秒...</>:<><I.Sparkle/> AI 生成小红书笔记</>}
+              </button>
+
+              <div className="it-tip">
+                <div className="it-tip-ic" style={{background:"#FFF0F1",color:"#FF2442"}}><I.Bulb/></div>
+                <div>
+                  <div className="it-tip-t">小红书爆款秘诀</div>
+                  <div className="it-tip-d">AI 将自动生成3篇不同风格的笔记，含标题、正文、标签和互动引导。先给价值再软植入，转化效果最佳。</div>
+                </div>
+              </div>
+              </>:<>
               <div className="it-fg">
                 <div className="it-fg-l">标题 <span className="it-fg-ct">{itTitle.length}/30</span></div>
                 <input className="it-inp" value={itTitle} onChange={e=>setItTitle(e.target.value.slice(0,30))} placeholder="请输入吸引人的标题..."/>
@@ -1426,16 +1563,86 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                   <div className="it-tip-d">尝试在正文中添加 "##" 作为小标题，AI 能更准确地识别文章结构并生成更有层次感的排版。</div>
                 </div>
               </div>
+              </>}
             </div>
           </div>
 
           {/* Right - preview */}
           <div className="it-right">
+            {itPlat==="小红书"&&xhsNotes.length>0?
+            <div style={{width:"100%",maxWidth:520,maxHeight:"calc(100vh - 84px)",overflow:"auto",display:"flex",flexDirection:"column",gap:14}}>
+              <div className="xhs-tabs">
+                {xhsNotes.map((n,i)=>(
+                  <button key={i} className={`xhs-tab ${xhsSel===i?"on":""}`} onClick={()=>setXhsSel(i)}>
+                    {n.style||("笔记"+(i+1))}
+                  </button>
+                ))}
+              </div>
+              {(()=>{const note=xhsNotes[xhsSel];if(!note)return null;return(
+              <div className="xhs-card">
+                <div className="xhs-card-hd">
+                  <div className="xhs-card-hd-ic">XHS</div>
+                  <div>
+                    <div className="xhs-card-hd-t">{note.style||"小红书笔记"}</div>
+                    <div className="xhs-card-hd-d">{xhsProd} · AI 生成</div>
+                  </div>
+                </div>
+
+                <div className="xhs-sec">
+                  <div className="xhs-sec-t">📌 标题选项 <span style={{fontSize:10,color:"var(--t3)",fontWeight:400}}>点击复制</span></div>
+                  {(note.titles||[]).map((t,i)=>(
+                    <div key={i} className="xhs-title-opt" onClick={()=>{navigator.clipboard.writeText(t)}}>
+                      <span className="xhs-title-n">{i+1}</span>
+                      <span style={{flex:1}}>{t}</span>
+                      <I.Copy/>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="xhs-sec">
+                  <div className="xhs-sec-t" style={{justifyContent:"space-between"}}>
+                    <span>📄 正文内容</span>
+                    <button className="xhs-copy-btn" onClick={()=>navigator.clipboard.writeText(note.content||"")}><I.Copy/> 复制正文</button>
+                  </div>
+                  <div className="xhs-content">{note.content}</div>
+                </div>
+
+                {note.hashtags?.length>0&&<div className="xhs-sec">
+                  <div className="xhs-sec-t">🏷️ 话题标签</div>
+                  <div className="xhs-tags">{note.hashtags.map((h,i)=><span key={i} className="xhs-tag">{h}</span>)}</div>
+                </div>}
+
+                {note.interaction_guide&&<div className="xhs-sec">
+                  <div className="xhs-sec-t">💬 互动引导</div>
+                  <div className="xhs-meta">{note.interaction_guide}</div>
+                </div>}
+
+                {note.cover_suggestion&&<div className="xhs-sec">
+                  <div className="xhs-sec-t">🖼️ 封面建议</div>
+                  <div className="xhs-meta">{note.cover_suggestion}</div>
+                </div>}
+
+                {note.best_post_time&&<div className="xhs-sec">
+                  <div className="xhs-sec-t">⏰ 最佳发布时间</div>
+                  <div className="xhs-meta">{note.best_post_time}</div>
+                </div>}
+
+                <button className="xhs-copy-all" onClick={()=>{
+                  const txt=[(note.titles||[])[0]||"","",note.content||"","",(note.hashtags||[]).join(" "),"",note.interaction_guide||""].join("\n");
+                  navigator.clipboard.writeText(txt);
+                }}>
+                  <I.Copy/> 一键复制全部内容
+                </button>
+              </div>
+              );})()}
+            </div>
+            :
             <div className="it-preview">
+              {itPlat==="小红书"&&xhsBusy?
               <div className="it-pv-empty">
-                <div className="it-pv-ic">✨</div>
-                <div className="it-pv-t">等待生成预览</div>
-                <div className="it-pv-d">在左侧面板输入内容并点击<br/>"AI 智能排版" 即可查看效果</div>
+                <div className="it-pv-ic" style={{animation:"spin 2s linear infinite",background:"#FFF0F1",color:"#FF2442"}}>📝</div>
+                <div className="it-pv-t">AI 正在创作小红书笔记...</div>
+                <div className="it-pv-d">正在分析产品特点，匹配爆款模式<br/>生成3篇不同风格的笔记，约需30秒</div>
                 <div className="it-pv-skel">
                   <div className="it-pv-skel-line w60"/>
                   <div className="it-pv-skel-line w80"/>
@@ -1444,7 +1651,20 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                   <div className="it-pv-skel-line w40"/>
                 </div>
               </div>
-            </div>
+              :
+              <div className="it-pv-empty">
+                <div className="it-pv-ic">{itPlat==="小红书"?"📝":"✨"}</div>
+                <div className="it-pv-t">{itPlat==="小红书"?"等待生成小红书笔记":"等待生成预览"}</div>
+                <div className="it-pv-d">{itPlat==="小红书"?<>在左侧填写产品信息并点击<br/>"AI 生成小红书笔记" 即可生成</>:<>在左侧面板输入内容并点击<br/>"AI 智能排版" 即可查看效果</>}</div>
+                <div className="it-pv-skel">
+                  <div className="it-pv-skel-line w60"/>
+                  <div className="it-pv-skel-line w80"/>
+                  <div className="it-pv-skel-block"/>
+                  <div className="it-pv-skel-line w80"/>
+                  <div className="it-pv-skel-line w40"/>
+                </div>
+              </div>}
+            </div>}
           </div>
         </div>}
         {pg==="schedule"&&<>{/* Schedule page */}
