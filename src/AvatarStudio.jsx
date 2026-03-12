@@ -208,7 +208,7 @@ const STYLES = `
 /* ═══ API helpers ═══ */
 const callGemini = async (prompt) => {
   const r = await fetch(API_BASE + "/chat/completions", { method: "POST", headers: hdrs,
-    body: JSON.stringify({ model: "gemini-3.1-pro-preview", messages: [{ role: "user", content: prompt }], temperature: 0.8 }) });
+    body: JSON.stringify({ model: "gemini-2.5-flash", messages: [{ role: "user", content: prompt }], temperature: 0.8 }) });
   const d = await r.json();
   return d.choices?.[0]?.message?.content || "";
 };
@@ -313,7 +313,7 @@ export default function AvatarStudio() {
 
   /* ─── State: Generated assets ─── */
   const [avatarImg, setAvatarImg] = useState(PRESETS[0].imgUrl);
-  const [imgLoading, setImgLoading] = useState(false);
+  const imgLoading = false; // no longer used, kept for JSX refs
   const [ttsUrl, setTtsUrl] = useState(null);
   const [ttsLoading, setTtsLoading] = useState(false);
   const [scriptLoading, setScriptLoading] = useState(false);
@@ -354,17 +354,14 @@ export default function AvatarStudio() {
   /* ─── State: Create avatar modal ─── */
   const [showCreate, setShowCreate] = useState(false);
   const [cName, setCName] = useState("");
-  const [cDesc, setCDesc] = useState("");
-  const [cGender, setCGender] = useState("female");
-  const [cAge, setCAge] = useState("25-30");
-  const [cStyle, setCStyle] = useState("写实");
+  const [cPhoto, setCPhoto] = useState(null);       // File object
+  const [cPhotoPreview, setCPhotoPreview] = useState(null); // blob URL for preview
   const [cBusy, setCBusy] = useState(false);
   const [cErr, setCErr] = useState("");
+  const cFileRef = useRef(null);
 
-  /* ─── Derived: pipeline step (always 1-based for visible steps) ─── */
-  const pStep = isPreset
-    ? (!script.trim() ? 1 : !ttsUrl ? 2 : 3)
-    : (!avatarImg ? 1 : !script.trim() ? 2 : !ttsUrl ? 3 : 4);
+  /* ─── Derived: pipeline step (1=文案 2=语音 3=视频) ─── */
+  const pStep = !script.trim() ? 1 : !ttsUrl ? 2 : 3;
 
   /* ─── Persist customs ─── */
   useEffect(() => { localStorage.setItem("avs_custom", JSON.stringify(customs)); }, [customs]);
@@ -400,22 +397,7 @@ export default function AvatarStudio() {
     setOpenSec(1);
   };
 
-  /* ─── Step 1: Generate avatar image ─── */
-  const handleGenImage = async (customPrompt) => {
-    if (imgLoading) return;
-    setImgLoading(true);
-    try {
-      const prompt = customPrompt || sel.imgPrompt;
-      const size = screen === "竖屏" ? "1024x1536" : "1536x1024";
-      const url = await genImage(prompt, size);
-      setAvatarImg(url);
-      resetDownstream(2);
-      setOpenSec(2); // auto-advance to next section
-    } catch (e) { alert("形象生成失败: " + e.message); }
-    finally { setImgLoading(false); }
-  };
-
-  /* ─── Step 2: AI generate script ─── */
+  /* ─── Step 1: AI generate script ─── */
   const handleGenScript = async () => {
     if (scriptLoading) return;
     setScriptLoading(true);
@@ -557,21 +539,32 @@ export default function AvatarStudio() {
     }
   };
 
-  /* ─── Create custom avatar ─── */
+  /* ─── Create custom avatar from uploaded photo ─── */
+  const handlePhotoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setCErr("请上传图片文件"); return; }
+    if (file.size > 10 * 1024 * 1024) { setCErr("图片不能超过 10MB"); return; }
+    setCPhoto(file);
+    if (cPhotoPreview) URL.revokeObjectURL(cPhotoPreview);
+    setCPhotoPreview(URL.createObjectURL(file));
+    setCErr("");
+  };
+
   const handleCreateAvatar = async () => {
     if (!cName.trim()) { setCErr("请输入名称"); return; }
+    if (!cPhoto) { setCErr("请上传真人照片"); return; }
     setCBusy(true); setCErr("");
     try {
-      const styleMap = { "写实": "photorealistic, studio portrait photography", "动漫": "anime illustration style, high quality", "3D": "3D rendered Pixar style, high quality" };
-      const genderEn = cGender === "male" ? "man" : "woman";
-      const prompt = `Professional headshot portrait of a Chinese ${genderEn} aged ${cAge}, ${cDesc || cName}, ${styleMap[cStyle]}, looking directly at camera, face occupying 60 percent of frame, soft even studio lighting, plain gradient background, shoulders and upper chest visible, neutral pleasant expression, high resolution`;
-      const url = await genImage(prompt, "1024x1536");
-      const newAv = { id: "c_" + Date.now(), nm: cName.trim(), tags: `${cGender === "male" ? "男" : "女"} · ${cAge} · ${cStyle}`, gender: cGender, age: cAge, style: cStyle, imgPrompt: prompt, imgUrl: url };
+      // Compress & convert to base64 for persistence (localStorage)
+      const b64 = await imgToBase64(cPhotoPreview);
+      const newAv = { id: "c_" + Date.now(), nm: cName.trim(), tags: "自定义 · 真人", imgUrl: b64 };
       setCustoms(prev => [...prev, newAv]);
-      setSelId(newAv.id); setAvatarImg(url);
-      setShowCreate(false); setCName(""); setCDesc(""); setCErr("");
-      resetDownstream(2); setOpenSec(2);
-    } catch (e) { setCErr("生成失败: " + e.message); }
+      setSelId(newAv.id); setAvatarImg(b64);
+      if (cPhotoPreview) URL.revokeObjectURL(cPhotoPreview);
+      setShowCreate(false); setCName(""); setCPhoto(null); setCPhotoPreview(null); setCErr("");
+      resetDownstream(2); setOpenSec(1);
+    } catch (e) { setCErr("处理图片失败: " + e.message); }
     finally { setCBusy(false); }
   };
 
@@ -608,10 +601,9 @@ export default function AvatarStudio() {
     );
   };
 
-  const allStepLabels = ["生成形象", "编写文案", "语音合成", "生成视频"];
-  const stepLabels = isPreset ? allStepLabels.slice(1) : allStepLabels;
-  // Section numbering: preset → 1=口播 2=语音 3=视频; custom → 1=形象 2=口播 3=语音 4=视频
-  const S = isPreset ? 0 : 1; // offset: section for 口播 = 1+S
+  // All avatars (preset & custom) now have photos ready — always 3 steps
+  const stepLabels = ["编写文案", "语音合成", "生成视频"];
+  const S = 0; // no offset needed
 
   /* ═══ RENDER ═══ */
   return (
@@ -623,7 +615,7 @@ export default function AvatarStudio() {
         <div className="avs-l">
           <div className="avs-l-hd">
             <div className="avs-l-t">数字人形象</div>
-            <div className="avs-l-d">选择预设或生成自定义数字人</div>
+            <div className="avs-l-d">选择预设或上传真人照片</div>
           </div>
           <div className="avs-l-sc">
             <div className="avs-l-sec">预设形象</div>
@@ -651,7 +643,7 @@ export default function AvatarStudio() {
             </>}
             <div className="avs-add" onClick={() => { setShowCreate(true); setCErr(""); }}>
               <div style={{ color: "var(--p)", marginBottom: 4 }}><I.Plus /></div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--t2)" }}>生成自定义数字人</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--t2)" }}>上传自定义数字人</div>
               <div style={{ fontSize: 10, color: "var(--t3)" }}>AI 生成专属形象</div>
             </div>
           </div>
@@ -677,7 +669,7 @@ export default function AvatarStudio() {
                 {screen === "竖屏" && <div className="avs-ph-notch" />}
                 {vidUrl ? <video ref={vidRef} src={vidUrl} loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   : avatarImg ? <img src={avatarImg} alt="avatar" />
-                  : <div className="avs-empty"><I.Camera /><span>选择形象并点击「生成形象图片」</span></div>}
+                  : <div className="avs-empty"><I.Camera /><span>请在左侧选择或上传数字人形象</span></div>}
                 {imgLoading && <div className="avs-loading"><span className="avs-spin" /><span style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>AI 生成形象中...</span></div>}
                 {vidStep === 1 && !imgLoading && <div className="avs-loading"><span className="avs-spin" /><span style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>视频生成中 {vidProgress}%</span></div>}
                 {vidUrl && !imgLoading && vidStep !== 1 && <div className="avs-playbtn" onClick={handlePlayCombo}>{comboPlaying ? <I.Pause /> : <I.Play />}</div>}
@@ -695,34 +687,15 @@ export default function AvatarStudio() {
             <div className="avs-r-d">按步骤配置，生成数字人口播视频</div>
           </div>
           <div className="avs-r-sc">
-            {/* ─── 生成形象（仅自定义角色需要） ─── */}
-            {!isPreset && renderSection(1, "生成数字人形象", avatarImg ? "done" : "ready", <>
-              <div className="avs-hint"><I.Info /><span>数字人源图要求：正面面部占画面 60%，光线均匀，表情自然，无遮挡，简洁背景。AI 会自动按此标准生成。</span></div>
-              <div className="avs-fg">
-                <div className="avs-fl">当前形象</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--p)" }}>{sel.nm} <span style={{ fontWeight: 400, color: "var(--t3)", fontSize: 11 }}>（{sel.tags}）</span></div>
-              </div>
-              <div className="avs-fg">
-                <div className="avs-fl">屏幕比例</div>
-                <div className="avs-scr-btns">
-                  <button className={`avs-scr ${screen === "竖屏" ? "on" : ""}`} onClick={() => setScreen("竖屏")}>竖屏 9:16</button>
-                  <button className={`avs-scr ${screen === "横屏" ? "on" : ""}`} onClick={() => setScreen("横屏")}>横屏 16:9</button>
-                </div>
-              </div>
-              <button className="avs-btn purple" onClick={() => handleGenImage()} disabled={imgLoading}>
-                {imgLoading ? <><span className="avs-spin-sm" /> 生成中（约15-30秒）...</> : <><I.Image /> {avatarImg ? "重新生成形象" : "生成形象图片"}</>}
-              </button>
-            </>)}
-
             {/* ─── 口播内容 ─── */}
             {renderSection(1+S, "口播内容配置", script.trim() ? "done" : (avatarImg ? "ready" : undefined), <>
-              {isPreset && <div className="avs-fg">
+              <div className="avs-fg">
                 <div className="avs-fl">屏幕比例</div>
                 <div className="avs-scr-btns">
                   <button className={`avs-scr ${screen === "竖屏" ? "on" : ""}`} onClick={() => setScreen("竖屏")}>竖屏 9:16</button>
                   <button className={`avs-scr ${screen === "横屏" ? "on" : ""}`} onClick={() => setScreen("横屏")}>横屏 16:9</button>
                 </div>
-              </div>}
+              </div>
               <div className="avs-fg">
                 <div className="avs-fl">视频主题 <span className="req">*</span></div>
                 <input className="avs-inp" value={theme} onChange={e => setTheme(e.target.value)} placeholder="如：2024护肤新趋势、新品发布、行业分析..." />
@@ -866,52 +839,49 @@ export default function AvatarStudio() {
         </div>
       </div>
 
-      {/* ═══ MODAL: Create custom avatar ═══ */}
+      {/* ═══ MODAL: Create custom avatar (upload photo) ═══ */}
       {showCreate && (
-        <div className="avs-ov" onClick={e => { if (e.target === e.currentTarget && !cBusy) setShowCreate(false); }}>
+        <div className="avs-ov" onClick={e => { if (e.target === e.currentTarget) setShowCreate(false); }}>
           <div className="avs-modal">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
               <div>
-                <div style={{ fontSize: 16, fontWeight: 800 }}>生成自定义数字人</div>
-                <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>描述你的数字人形象，AI 按照口播视频标准生成肖像</div>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>上传自定义数字人</div>
+                <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>上传一张真人正面照片，用于合成数字人口播视频</div>
               </div>
-              {!cBusy && <button style={{ border: "none", background: "none", cursor: "pointer", color: "var(--t2)" }} onClick={() => setShowCreate(false)}><I.X /></button>}
+              <button style={{ border: "none", background: "none", cursor: "pointer", color: "var(--t2)" }} onClick={() => setShowCreate(false)}><I.X /></button>
             </div>
-            <div className="avs-hint"><I.Info /><span>AI 将自动确保：正面朝镜头、面部占60%、光线均匀、简洁背景——满足数字人视频驱动的最佳源图要求。</span></div>
+            <div className="avs-hint"><I.Info /><span>照片要求：正面朝镜头、面部清晰、光线均匀、简洁背景。半身照效果最佳。</span></div>
             <div className="avs-fg">
               <div className="avs-fl">名称 <span className="req">*</span></div>
-              <input className="avs-inp" value={cName} onChange={e => setCName(e.target.value)} placeholder="如：专业讲师、时尚博主、科技CEO..." disabled={cBusy} />
+              <input className="avs-inp" value={cName} onChange={e => setCName(e.target.value)} placeholder="给你的数字人起个名字..." />
             </div>
             <div className="avs-fg">
-              <div className="avs-fl">形象描述 <span style={{ color: "var(--t3)", fontWeight: 400, fontSize: 10 }}>越详细效果越好</span></div>
-              <textarea className="avs-inp" rows={3} value={cDesc} onChange={e => setCDesc(e.target.value)} placeholder="如：30岁左右，短发干练，穿白色衬衫，戴细框眼镜，温和自信的微笑，知性气质..." disabled={cBusy} style={{ resize: "vertical" }} />
-            </div>
-            <div className="avs-row" style={{ marginBottom: 12 }}>
-              <div className="avs-fg">
-                <div className="avs-fl">性别</div>
-                <div className="avs-scr-btns">
-                  <button className={`avs-scr ${cGender === "female" ? "on" : ""}`} onClick={() => setCGender("female")}>女性</button>
-                  <button className={`avs-scr ${cGender === "male" ? "on" : ""}`} onClick={() => setCGender("male")}>男性</button>
+              <div className="avs-fl">上传照片 <span className="req">*</span></div>
+              <input type="file" accept="image/*" ref={cFileRef} onChange={handlePhotoChange} style={{ display: "none" }} />
+              {cPhotoPreview ? (
+                <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", border: "2px solid var(--bl)", maxWidth: 200 }}>
+                  <img src={cPhotoPreview} alt="preview" style={{ width: "100%", display: "block" }} />
+                  <div style={{ position: "absolute", top: 6, right: 6, width: 24, height: 24, borderRadius: 6, background: "rgba(0,0,0,.55)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                    onClick={() => { setCPhoto(null); if (cPhotoPreview) URL.revokeObjectURL(cPhotoPreview); setCPhotoPreview(null); if (cFileRef.current) cFileRef.current.value = ""; }}>
+                    <I.X />
+                  </div>
                 </div>
-              </div>
-              <div className="avs-fg">
-                <div className="avs-fl">年龄段</div>
-                <div className="avs-chips">
-                  {["20-25", "25-30", "30-35", "35-45", "45+"].map(a => <span key={a} className={`avs-chip ${cAge === a ? "on" : ""}`} onClick={() => setCAge(a)}>{a}</span>)}
+              ) : (
+                <div className="avs-upload" onClick={() => cFileRef.current?.click()}
+                  style={{ border: "2px dashed var(--bl)", borderRadius: 12, padding: "28px 16px", textAlign: "center", cursor: "pointer", transition: "border-color .2s" }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = "var(--p)"}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = "var(--bl)"}>
+                  <div style={{ color: "var(--p)", marginBottom: 6 }}><I.Plus /></div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t2)" }}>点击上传真人照片</div>
+                  <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 4 }}>支持 JPG/PNG，建议正面半身照</div>
                 </div>
-              </div>
-            </div>
-            <div className="avs-fg">
-              <div className="avs-fl">画风</div>
-              <div className="avs-chips">
-                {["写实", "动漫", "3D"].map(s => <span key={s} className={`avs-chip ${cStyle === s ? "on" : ""}`} onClick={() => setCStyle(s)}>{s}</span>)}
-              </div>
+              )}
             </div>
             {cErr && <div style={{ padding: "8px 12px", background: "#FEF2F2", borderRadius: 8, fontSize: 12, color: "#DC2626", marginBottom: 12 }}>{cErr}</div>}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              {!cBusy && <button className="avs-btn ghost" style={{ width: "auto", padding: "9px 18px", marginTop: 0 }} onClick={() => setShowCreate(false)}>取消</button>}
-              <button className="avs-btn purple" style={{ width: "auto", padding: "9px 22px", marginTop: 0 }} onClick={handleCreateAvatar} disabled={cBusy}>
-                {cBusy ? <><span className="avs-spin-sm" /> 生成中（约20秒）...</> : <><I.Sparkle /> 生成数字人</>}
+              <button className="avs-btn ghost" style={{ width: "auto", padding: "9px 18px", marginTop: 0 }} onClick={() => setShowCreate(false)}>取消</button>
+              <button className="avs-btn purple" style={{ width: "auto", padding: "9px 22px", marginTop: 0 }} onClick={handleCreateAvatar}>
+                <I.Check /> 确认添加
               </button>
             </div>
           </div>

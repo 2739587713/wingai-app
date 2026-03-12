@@ -1,12 +1,13 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { execFile } from 'child_process'
-import { readFile, unlink } from 'fs/promises'
+import { spawn } from 'child_process'
+import { readFile, writeFile, unlink } from 'fs/promises'
+import { tmpdir } from 'os'
 import { join } from 'path'
-import { randomUUID } from 'crypto'
 
 /* ═══ Edge TTS plugin (Python edge-tts via child process) ═══ */
 function edgeTTSPlugin() {
+  let counter = 0
   return {
     name: 'edge-tts',
     configureServer(server) {
@@ -18,17 +19,38 @@ function edgeTTSPlugin() {
         try {
           const { text, voice = 'zh-CN-XiaoxiaoNeural', rate = '+0%', pitch = '+0Hz' } = JSON.parse(body)
           if (!text) { res.writeHead(400); res.end('missing text'); return }
-          const tmpFile = join(process.cwd(), `.tts_${randomUUID().slice(0, 8)}.mp3`)
-          console.log(`[edge-tts] generating: voice=${voice} text=${text.slice(0, 30)}...`)
+          const id = Date.now() + '_' + (++counter)
+          const txtFile = join(tmpdir(), `edge_tts_${id}.txt`)
+          const mp3File = join(tmpdir(), `edge_tts_${id}.mp3`)
+          // Write a tiny Python script to avoid CLI arg encoding issues on Windows
+          const pyScript = `
+import asyncio, edge_tts
+async def main():
+    with open(r"${txtFile}", encoding="utf-8") as f:
+        text = f.read()
+    c = edge_tts.Communicate(text, "${voice}", rate="${rate}", pitch="${pitch}")
+    await c.save(r"${mp3File}")
+asyncio.run(main())
+`
+          const pyFile = txtFile.replace('.txt', '.py')
+          await writeFile(txtFile, text, 'utf-8')
+          await writeFile(pyFile, pyScript, 'utf-8')
+          console.log(`[edge-tts] voice=${voice} len=${text.length}`)
           await new Promise((resolve, reject) => {
-            const args = ['-m', 'edge_tts', '--text', text, '--voice', voice, '--rate', rate, '--pitch', pitch, '--write-media', tmpFile]
-            execFile('python', args, { timeout: 60000 }, (err, stdout, stderr) => {
-              if (err) { console.error('[edge-tts] exec error:', err.message, stderr); reject(err) }
-              else resolve()
+            const p = spawn('python', [pyFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+            let stderr = ''
+            p.stderr.on('data', d => stderr += d)
+            p.on('close', code => {
+              if (code === 0) resolve()
+              else reject(new Error(`edge-tts exit ${code}: ${stderr.slice(0, 300)}`))
             })
+            p.on('error', reject)
+            setTimeout(() => { p.kill(); reject(new Error('edge-tts timeout')) }, 60000)
           })
-          const audio = await readFile(tmpFile)
-          await unlink(tmpFile).catch(() => {})
+          await unlink(txtFile).catch(() => {})
+          await unlink(pyFile).catch(() => {})
+          const audio = await readFile(mp3File)
+          await unlink(mp3File).catch(() => {})
           console.log(`[edge-tts] ${voice}: ${audio.length} bytes`)
           res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': audio.length })
           res.end(audio)
