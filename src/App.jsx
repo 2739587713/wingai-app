@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import AvatarStudio from "./AvatarStudio.jsx";
 
 const I={
   Zap:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>,
@@ -171,11 +172,16 @@ export default function App(){
   // xhs generator
   const [xhsProd,setXhsProd]=useState("");
   const [xhsAudience,setXhsAudience]=useState("");
-  const [xhsStyle,setXhsStyle]=useState("干货教程");
   const [xhsSelling,setXhsSelling]=useState("");
   const [xhsBusy,setXhsBusy]=useState(false);
+  const [xhsPhase,setXhsPhase]=useState(""); // ""→search→analyzed→generate→done
+  const [xhsAnalysis,setXhsAnalysis]=useState(null);
+  const [xhsAnalysisText,setXhsAnalysisText]=useState("");
+  const [xhsRecStyles,setXhsRecStyles]=useState([]);
+  const [xhsSelStyles,setXhsSelStyles]=useState([]);
   const [xhsNotes,setXhsNotes]=useState([]);
   const [xhsSel,setXhsSel]=useState(0);
+  const [xhsEditIdx,setXhsEditIdx]=useState(-1);
   // schedule page
   const [schMonth,setSchMonth]=useState(new Date().getMonth());
   const [schYear,setSchYear]=useState(new Date().getFullYear());
@@ -310,66 +316,206 @@ export default function App(){
     const data=await resp.json();
     return data.choices?.[0]?.message?.content||"生成失败，请重试";
   };
-  const generateXhs=async()=>{
-    if(!xhsProd.trim()){alert("请填写产品/服务名称");return;}
-    setXhsBusy(true);setXhsNotes([]);setXhsSel(0);
-    const styleDescs={"干货教程":"专业有条理、步骤清晰、有实操价值，像资深从业者分享经验","痛点共鸣":"引起共鸣、解决问题、情感连接、理解用户痛苦并提供解决方案","案例展示":"真实案例、数据说话、前后对比、有理有据建立信任","经验分享":"个人视角、真实经历、接地气、像朋友聊天不做作","避坑指南":"常见错误、血泪教训、实用建议、过来人的忠告"};
-    const allStyles=["干货教程","痛点共鸣","案例展示","经验分享","避坑指南"];
-    const orderedStyles=[xhsStyle,...allStyles.filter(s=>s!==xhsStyle)].slice(0,3);
-    const prompt=`你是一位精通小红书的爆款内容创作者。请为以下产品/服务创作3篇不同风格的小红书笔记。
+  // ===== 千问搜索拆解（走 apiyi 代理） =====
+  const callQwen=async(prompt)=>{
+    const resp=await fetch("/api-proxy/v1/chat/completions",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer sk-QFvD052YMpEvAN3oBc7228BcD24a44FdB9A73f2a62BeDb3b"},
+      body:JSON.stringify({
+        model:"qwen3-max",
+        messages:[{role:"user",content:prompt}],
+        enable_search:true,
+        search_options:{search_strategy:"max"},
+        temperature:0.3,
+        max_tokens:8192,
+      })
+    });
+    if(!resp.ok){const t=await resp.text();throw new Error("Qwen API "+resp.status+": "+t.slice(0,200));}
+    const data=await resp.json();
+    return data.choices?.[0]?.message?.content||"";
+  };
 
-【产品/服务信息】
+  // ====== 第一步：搜索爆款 + 拆解 ======
+  const searchXhs=async()=>{
+    if(!xhsProd.trim()){alert("请填写产品/服务名称");return;}
+    setXhsBusy(true);setXhsNotes([]);setXhsSel(0);setXhsAnalysis(null);setXhsAnalysisText("");setXhsRecStyles([]);setXhsSelStyles([]);setXhsPhase("search");
+
+    const searchPrompt=`你是一位顶级小红书内容策略师，擅长从真实爆款数据中提炼可复用的内容模式。
+
+现在有一个客户需要在小红书上推广，以下是他的信息：
+- 产品/服务：${xhsProd}
+${xhsAudience?"- 目标受众："+xhsAudience:""}
+${xhsSelling?"- 核心卖点："+xhsSelling:""}
+
+请你完成以下任务：
+
+【第一步：智能选词】
+根据客户的产品信息，自主推导出5-8个最有效的小红书搜索关键词。要覆盖：
+- 产品/服务的直接关键词（如"美白面霜"）
+- 所属行业/品类词（如"护肤品推荐"）
+- 目标受众的需求词、痛点词（如"敏感肌怎么选面霜"）
+- 竞品/同行常用的内容标签词（如"平价护肤"）
+- 场景词（如"换季护肤"）
+不需要客户提供，你自己判断。
+
+【第二步：联网搜索爆款笔记】
+用上面推导出的关键词，联网搜索小红书上的真实笔记。重点筛选符合以下"爆款"标准的笔记：
+
+📊 爆款判定标准（满足任意2条即算爆款）：
+① 低粉爆文：作者粉丝<1万，但单篇点赞≥500或收藏≥300——说明纯靠内容质量起量，最值得学习
+② 高收藏率：收藏数 ≥ 点赞数×60%——说明内容有实用干货价值，用户愿意存下来反复看，长尾流量好
+③ 高互动率：评论数 ≥ 点赞数×8%——说明内容引发了真实讨论和争议，话题性强
+④ 高分享率：分享数 ≥ 点赞数×5%——说明内容有社交传播价值，用户愿意转发给朋友
+⑤ 万赞级爆文：点赞≥1万——绝对数量级的爆款，不管粉丝多少都值得分析
+⑥ 时效爆款：最近3个月内发布且点赞≥200、收藏≥100——说明当前小红书算法偏好这类内容
+⑦ 垂直领域头部：在该细分品类下排名前列的笔记，能代表品类内容趋势
+
+🔍 额外关注：
+- 同一个作者如果有多篇爆款，重点分析——说明其方法论可复用
+- 图文笔记和视频笔记都要覆盖
+- 注意区分"广告投放的假爆款"和"自然流量的真爆款"，优先真爆款
+
+请尽量找到8-15篇符合条件的爆款笔记。
+
+【第三步：深度拆解】
+对找到的爆款笔记逐一拆解，然后综合提炼共性规律：
+
+1. 标题公式：提取可直接套用的标题模板
+2. 开头Hook：前两句抓注意力的手法（痛点/数据/反常识/提问/场景代入）
+3. 内容结构：正文组织方式（列表干货/故事线/对比实验/问答/步骤教程）
+4. 信任建立：数据、案例、从业经验、客户反馈、专业背书等
+5. 转化设计：引导关注/私信/咨询的CTA位置和写法
+6. 语气风格：用词习惯、emoji风格、人设调性
+7. 标签策略：高频出现的话题标签
+
+【第四步：推荐创作风格】
+根据拆解结果，推荐3-5种最适合该产品的小红书笔记风格。从以下风格库中选择并排序：
+- 干货教程：专业有条理，步骤清晰，适合知识型/服务型产品
+- 痛点共鸣：引起共鸣，解决问题，适合大众消费品/服务
+- 案例展示：真实案例+数据，适合有成功案例的服务/产品
+- 经验分享：个人视角，接地气，适合个人品牌/体验型产品
+- 避坑指南：血泪教训，适合决策成本高的产品/服务
+- 清单种草：好物推荐列表，适合消费品/多SKU产品
+- 对比测评：横向对比，适合竞争激烈的品类
+- 故事营销：品牌故事/用户故事，适合有故事可讲的品牌
+
+每个推荐风格要说明：为什么适合、在爆款中的占比、预期效果。
+
+请用JSON格式返回，不要有JSON之外的文字：
+{
+  "search_keywords":["搜索关键词1","关键词2","关键词3"],
+  "searched_notes":[
+    {"title":"笔记标题","author":"作者","followers":"粉丝数","likes":"点赞数","collects":"收藏数","comments":"评论数","shares":"分享数","why_viral":"命中了哪条爆款标准","is_ad":false,"summary":"内容摘要（80字）"}
+  ],
+  "title_formulas":[
+    {"formula":"可复用的标题公式","example":"具体示例","why":"为什么有效","used_count":"多少篇爆款用了类似公式"}
+  ],
+  "opening_hooks":[
+    {"type":"hook类型","template":"可复用模板","example":"真实爆款开头原文"}
+  ],
+  "winning_structures":[
+    {"name":"结构名称","outline":["段落1功能","段落2","段落3","段落4","段落5"],"description":"为什么有效","frequency":"在爆款中出现的频率"}
+  ],
+  "trust_tactics":["策略1","策略2","策略3","策略4"],
+  "conversion_tactics":[
+    {"tactic":"转化策略","example":"真实CTA文案","position":"位置"}
+  ],
+  "tone_style":"综合语气风格（100字，涵盖人设/用词/emoji）",
+  "hot_hashtags":["#标签1","#标签2","#标签3","#标签4","#标签5","#标签6","#标签7","#标签8"],
+  "key_insights":["关键洞察1","洞察2","洞察3"],
+  "do_list":["创作必做1","2","3","4","5"],
+  "dont_list":["创作禁忌1","2","3"],
+  "recommended_styles":[
+    {"style":"风格名称","reason":"为什么适合这个产品（30字）","match":"高/中/低","frequency":"在爆款中占比如 40%"}
+  ]
+}`;
+
+    try{
+      console.log("[XHS] Step 1: Qwen searching for",xhsProd);
+      const searchRaw=await callQwen(searchPrompt);
+      console.log("[XHS] Qwen raw length:",searchRaw.length);
+
+      let analysisData=null;
+      const jm=searchRaw.match(/\{[\s\S]*\}/);
+      if(jm){try{analysisData=JSON.parse(jm[0]);}catch(e){console.log("[XHS] JSON parse err, raw text");}}
+      const aText=analysisData?JSON.stringify(analysisData,null,2):searchRaw;
+      setXhsAnalysis(analysisData||{raw:searchRaw});
+      setXhsAnalysisText(aText);
+
+      // 提取推荐风格
+      const rec=analysisData?.recommended_styles||[];
+      setXhsRecStyles(rec);
+      // 默认选中前3个
+      setXhsSelStyles(rec.slice(0,3).map(r=>r.style));
+      setXhsPhase("analyzed");
+    }catch(e){
+      console.error("[XHS] search error:",e);
+      alert("搜索失败："+e.message);
+      setXhsPhase("");
+    }finally{
+      setXhsBusy(false);
+    }
+  };
+
+  // ====== 第二步：基于拆解 + 选定风格生成笔记 ======
+  const generateXhsNotes=async()=>{
+    if(!xhsSelStyles.length){alert("请至少选择一种笔记风格");return;}
+    setXhsBusy(true);setXhsPhase("generate");setXhsNotes([]);setXhsSel(0);
+
+    const styleDescs={"干货教程":"专业有条理、步骤清晰、有实操价值","痛点共鸣":"引起共鸣、解决问题、情感连接","案例展示":"真实案例、数据说话、前后对比","经验分享":"个人视角、真实经历、接地气","避坑指南":"常见错误、血泪教训、实用建议","清单种草":"好物推荐列表、种草安利","对比测评":"横向对比、客观分析","故事营销":"品牌故事、用户故事、情感共鸣"};
+    const styleList=xhsSelStyles.map((s,i)=>`${i+1}. ${s}：${styleDescs[s]||s}`).join("\n");
+
+    try{
+      console.log("[XHS] Step 2: Gemini generating",xhsSelStyles);
+      const genPrompt=`你是一位精通小红书的爆款内容创作者。现在有一份来自真实小红书爆款笔记的深度拆解报告（由AI联网搜索并分析得出），请严格基于这份报告为客户创作${xhsSelStyles.length}篇小红书笔记。
+
+【真实爆款拆解报告】
+${xhsAnalysisText.slice(0,6000)}
+
+【客户产品/服务信息】
 名称：${xhsProd}
 ${xhsAudience?"目标受众："+xhsAudience:""}
 ${xhsSelling?"核心卖点："+xhsSelling:""}
 
-【3篇笔记的风格要求】
-1. ${orderedStyles[0]}：${styleDescs[orderedStyles[0]]}
-2. ${orderedStyles[1]}：${styleDescs[orderedStyles[1]]}
-3. ${orderedStyles[2]}：${styleDescs[orderedStyles[2]]}
+【${xhsSelStyles.length}篇笔记的风格】
+${styleList}
 
-【小红书爆款特征——必须严格遵守】
-1. 标题：数字+痛点+好奇心+emoji，不超过20字，每篇给3个备选标题
-2. 开头：用痛点/数据/问题/反常识抓注意力，前两句决定用户是否继续读
-3. 正文：500-800字，真实感强，像朋友分享而非广告，段落清晰
-4. emoji：每段开头用emoji区分段落层次，增加阅读趣味
-5. 结尾：自然引导互动（评论/收藏/私信），不要硬广
-6. 标签：每篇5-8个相关话题标签，用#开头
-7. 信任建立：用具体数据和案例，先给价值再引导转化
-8. 语气：亲切专业但不生硬，像一个有经验的朋友在分享
+【铁律——不遵守等于白做】
+1. 标题必须套用报告中的标题公式，不要自己发明。带emoji，不超过20字，每篇给3个备选
+2. 开头必须套用报告中的hook模板，不要写"大家好今天给大家分享"这种废话开头
+3. 正文结构必须参考报告中的winning_structures，500-800字，emoji分段
+4. 信任元素必须参考报告中的trust_tactics，用具体数据和案例
+5. 转化设计必须参考报告中的conversion_tactics，自然引导不硬广
+6. 语气必须参考报告中的tone_style，像真人写的不像AI
+7. 标签必须优先使用报告中的hot_hashtags，每篇5-8个
+8. 每篇笔记的标题公式、开头hook、结构必须各不相同
 
-【转化设计】
-- 软植入产品/服务价值，不要硬广
-- 先给价值，再自然引导咨询
-- 用"评论区问我""私信我"而非留联系方式
-- 建立专业人设和信任感
-- 适当使用"收藏起来慢慢看""转发给需要的朋友"引导收藏转发
-
-严格按以下JSON格式输出，不要有任何JSON之外的文字：
+严格按以下JSON输出，不要有JSON之外的文字：
 {
   "notes":[
     {
       "style":"风格名称",
-      "titles":["标题1（带emoji，不超过20字）","标题2","标题3"],
-      "content":"正文内容（500-800字，用\\n换行，包含emoji分段）",
+      "titles":["标题1（带emoji，不超20字）","标题2","标题3"],
+      "content":"正文内容（500-800字，用\\n换行，emoji分段，像真人写的）",
       "hashtags":["#标签1","#标签2","#标签3","#标签4","#标签5"],
-      "interaction_guide":"互动引导语（引导评论/收藏/私信）",
+      "interaction_guide":"互动引导语",
       "cover_suggestion":"封面设计建议（配色/文字/构图）",
-      "best_post_time":"最佳发布时间建议"
+      "best_post_time":"最佳发布时间"
     }
   ]
 }`;
-    try{
-      const raw=await callGemini(prompt);
-      const m=raw.match(/\{[\s\S]*\}/);
-      if(!m)throw new Error("返回格式异常");
-      const parsed=JSON.parse(m[0]);
+      const genRaw=await callGemini(genPrompt);
+      const gm=genRaw.match(/\{[\s\S]*\}/);
+      if(!gm)throw new Error("Gemini返回格式异常");
+      const parsed=JSON.parse(gm[0]);
       const notes=parsed.notes||[];
       if(!notes.length)throw new Error("未生成笔记");
       setXhsNotes(notes);
+      setXhsPhase("done");
     }catch(e){
-      console.error("XHS generate error:",e);
-      alert("生成失败，请重试");
+      console.error("[XHS] generate error:",e);
+      alert("生成失败："+e.message);
+      setXhsPhase("analyzed");
     }finally{
       setXhsBusy(false);
     }
@@ -1181,7 +1327,38 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
 .xhs-meta{font-size:12px;color:var(--t2);line-height:1.7;padding:10px 14px;background:var(--s2);border-radius:10px;border:1px solid var(--bl)}
 .xhs-copy-all{width:100%;padding:12px;border-radius:0 0 16px 16px;border:none;border-top:1px solid var(--bl);background:var(--s);color:var(--p);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;transition:var(--tr)}.xhs-copy-all:hover{background:var(--pbg)}
 .xhs-copy-btn{font-size:11px;color:var(--p);font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;background:none;border:none;font-family:inherit;padding:0}.xhs-copy-btn:hover{opacity:.7}
-.xhs-style-chips{display:flex;flex-wrap:wrap;gap:8px}
+/* xhs analysis result */
+.xhs-result{margin-bottom:14px}
+.xhs-res-banner{padding:16px;border-radius:14px;border:1px solid var(--bl);background:var(--s);margin-bottom:16px;position:relative;overflow:hidden}
+.xhs-res-banner::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--p),var(--pl),var(--p));opacity:.7}
+.xhs-res-stats{display:flex;gap:0;margin-top:14px}
+.xhs-res-stat{flex:1;text-align:center;padding:10px 0;position:relative}
+.xhs-res-stat:not(:last-child)::after{content:'';position:absolute;right:0;top:20%;height:60%;width:1px;background:var(--bl)}
+.xhs-res-stat-n{font-size:20px;font-weight:800;color:var(--p);letter-spacing:-.5px}
+.xhs-res-stat-l{font-size:10px;color:var(--t3);margin-top:2px}
+.xhs-style-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.xhs-style-hd-t{font-size:13px;font-weight:700;color:var(--t1)}
+.xhs-style-hd-ct{font-size:10px;color:var(--t3)}
+.xhs-style-list{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.xhs-style-card{padding:14px 16px;border-radius:12px;border:1.5px solid var(--bl);background:var(--s);cursor:pointer;transition:all .2s;position:relative}
+.xhs-style-card:hover{border-color:var(--b);box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.xhs-style-card.on{border-color:var(--pl);background:var(--pbg);box-shadow:0 2px 12px rgba(124,58,237,.08)}
+.xhs-style-card .xsc-top{display:flex;align-items:center;gap:10px}
+.xhs-style-card .xsc-ck{width:18px;height:18px;border-radius:6px;border:1.5px solid var(--b);background:var(--s);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
+.xhs-style-card.on .xsc-ck{border-color:var(--p);background:var(--p)}
+.xhs-style-card .xsc-ic{width:36px;height:36px;border-radius:10px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;transition:all .15s}
+.xhs-style-card.on .xsc-ic{background:rgba(124,58,237,.1)}
+.xhs-style-card .xsc-name{font-size:13px;font-weight:700;color:var(--t1)}
+.xhs-style-card .xsc-right{display:flex;align-items:center;gap:6px;margin-left:auto;flex-shrink:0}
+.xhs-style-card .xsc-freq{font-size:10px;color:var(--t3);font-variant-numeric:tabular-nums}
+.xhs-style-card .xsc-badge{font-size:9px;font-weight:600;padding:2px 8px;border-radius:10px;white-space:nowrap}
+.xhs-style-card .xsc-badge.s{background:var(--pbg);color:var(--p)}
+.xhs-style-card .xsc-badge.a{background:#ECFDF5;color:#059669}
+.xhs-style-card .xsc-badge.b{background:var(--s3);color:var(--t3)}
+.xhs-style-card .xsc-reason{font-size:11px;color:var(--t2);line-height:1.5;margin-top:6px;padding-left:28px}
+.xhs-style-card.on .xsc-reason{color:var(--t1)}
+.xhs-resrch-btn{font-size:11px;color:var(--t3);background:none;border:none;cursor:pointer;font-family:inherit;padding:4px 8px;display:flex;align-items:center;gap:4px;border-radius:6px;transition:all .15s;margin-left:auto}
+.xhs-resrch-btn:hover{color:var(--p);background:var(--pbg)}
 /* schedule page */
 .sch-wrap{display:flex;height:calc(100vh - 52px);overflow:hidden}
 .sch-main{flex:1;display:flex;flex-direction:column;overflow:hidden}
@@ -1383,94 +1560,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
         </div>}
 
         {/* Placeholder pages */}
-        {pg==="avatar"&&<div className="av-wrap">
-          {/* Left - avatar selection */}
-          <div className="av-left">
-            <div className="av-left-t">选择数字人</div>
-            {[
-              {nm:"商务男",tags:"商务 | 正式 | 专业",res:"2K"},
-              {nm:"知性女",tags:"知性 | 优雅 | 职场",pro:true},
-              {nm:"活力少女",tags:"青春 | 活泼 | 亲和",res:"2K"},
-              {nm:"儒雅大叔",tags:"稳重 | 信赖 | 权威",res:"4K"},
-              {nm:"甜美主播",tags:"甜美 | 种草 | 带货",pro:true},
-            ].map((av,i)=>(
-              <div key={i} className={`av-card ${avSel===i?"on":""}`} onClick={()=>setAvSel(i)}>
-                <div className="av-card-img">
-                  <span style={{fontSize:28,opacity:.3}}><I.User/></span>
-                  {av.res&&<span className="av-res">{av.res}</span>}
-                  {av.pro&&<span className="av-pro">Pro</span>}
-                </div>
-                <div className="av-card-info">
-                  <div className="av-card-nm">{av.nm}</div>
-                  <div className="av-card-tags">{av.tags}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Center - phone preview */}
-          <div className="av-center">
-            <div className={`av-phone ${avScreen==="横屏"?"landscape":""}`}>
-              <div className="av-phone-inner">
-                {avScreen==="竖屏"&&<div className="av-phone-notch"/>}
-                <div className="av-phone-play"><I.Camera/></div>
-                <div className="av-phone-bar"/>
-              </div>
-            </div>
-          </div>
-
-          {/* Right - config */}
-          <div className="av-right">
-            <div className="av-right-t">视频配置</div>
-            <div className="av-right-d">自定义您的数字人视频内容</div>
-
-            <div className="av-fg">
-              <div className="av-fg-l">视频主题</div>
-              <input className="av-inp" value={avTheme} onChange={e=>setAvTheme(e.target.value)} placeholder="例如：2024年Q3季度财报分析..."/>
-            </div>
-
-            <div className="av-fg">
-              <div className="av-fg-l">口播文案 <span className="av-fg-tag">AI 润色</span></div>
-              <textarea className="av-inp" rows={5} value={avScript} onChange={e=>setAvScript(e.target.value)} placeholder="请输入或粘贴您的脚本文案，AI将根据文本自动生成口型和表情..." style={{resize:"vertical"}}/>
-              <div style={{textAlign:"right",fontSize:10,color:"var(--t3)",marginTop:4}}>{avScript.length} / 2000 字</div>
-            </div>
-
-            <button className="av-ai-btn"><I.Sparkle/> AI 生成文案</button>
-
-            <div className="av-row">
-              <div className="av-fg">
-                <div className="av-fg-l">数字人类型</div>
-                <select className="av-sel" value={avType} onChange={e=>setAvType(e.target.value)}>
-                  <option>数字人口播</option><option>数字人对话</option><option>数字人讲解</option>
-                </select>
-              </div>
-              <div className="av-fg">
-                <div className="av-fg-l">屏幕模式</div>
-                <div className="av-screen-btns">
-                  <button className={`av-scr ${avScreen==="竖屏"?"on":""}`} onClick={()=>setAvScreen("竖屏")}>📱 竖屏</button>
-                  <button className={`av-scr ${avScreen==="横屏"?"on":""}`} onClick={()=>setAvScreen("横屏")}>🖥 横屏</button>
-                </div>
-              </div>
-            </div>
-
-            <div className="av-fg">
-              <div className="av-fg-l">视频时长</div>
-              <select className="av-sel" value={avDur} onChange={e=>setAvDur(e.target.value)}>
-                <option>15s-30s</option><option>30s-60s</option><option>60s-120s</option><option>120s-180s</option>
-              </select>
-            </div>
-
-            <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--t2)",cursor:"pointer",marginBottom:8}}>
-              <div style={{width:16,height:16,borderRadius:4,border:"1.5px solid var(--bl)",display:"flex",alignItems:"center",justifyContent:"center"}}></div>
-              AI生成公众号文章
-            </div>
-
-            <div className="av-bottom">
-              <button className="av-b ghost"><I.Refresh/> 重新生成</button>
-              <button className="av-b primary"><I.Zap/> 生成视频</button>
-            </div>
-          </div>
-        </div>}
+        {pg==="avatar"&&<AvatarStudio/>}
         {pg==="imgtext"&&<div className="it-wrap">
           {/* Left - content input */}
           <div className="it-left">
@@ -1503,37 +1593,80 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
               </div>
 
               <div className="it-fg">
-                <div className="it-fg-l">笔记风格</div>
-                <div className="xhs-style-chips">
-                  {["干货教程","痛点共鸣","案例展示","经验分享","避坑指南"].map(s=>(
-                    <button key={s} className={`ch ${xhsStyle===s?"on":""}`} onClick={()=>setXhsStyle(s)}>{s}</button>
-                  ))}
-                </div>
-                <div style={{fontSize:10,color:"var(--t3)",marginTop:6}}>
-                  {xhsStyle==="干货教程"&&"专业有条理，步骤清晰，有实操价值"}
-                  {xhsStyle==="痛点共鸣"&&"引起共鸣，解决问题，情感连接"}
-                  {xhsStyle==="案例展示"&&"真实案例，数据说话，前后对比"}
-                  {xhsStyle==="经验分享"&&"个人视角，真实经历，接地气"}
-                  {xhsStyle==="避坑指南"&&"常见错误，血泪教训，实用建议"}
-                </div>
-              </div>
-
-              <div className="it-fg">
                 <div className="it-fg-l">核心卖点 <span className="it-fg-ct">选填，多个卖点用逗号分隔</span></div>
                 <textarea className="it-inp" rows={3} value={xhsSelling} onChange={e=>setXhsSelling(e.target.value)} placeholder="如：3年+经验、数据驱动增长、中英双语服务、按效果付费..." style={{resize:"vertical"}}/>
               </div>
 
-              <button className="it-gen-btn" onClick={generateXhs} disabled={xhsBusy} style={xhsBusy?{opacity:.7,cursor:"wait"}:{}}>
-                {xhsBusy?<><I.Refresh style={{animation:"spin 1s linear infinite"}}/> AI 生成中，约需30秒...</>:<><I.Sparkle/> AI 生成小红书笔记</>}
+              {/* 第一步按钮：搜索爆款 */}
+              {(xhsPhase===""||xhsPhase==="search")&&<>
+              <button className="it-gen-btn" onClick={searchXhs} disabled={xhsBusy} style={xhsBusy?{opacity:.7,cursor:"wait"}:{}}>
+                {xhsBusy?<><I.Search/> 正在搜索同行爆款笔记...</>:<><I.Search/> 搜索同行爆款</>}
               </button>
-
+              {xhsBusy&&<div style={{padding:"12px 14px",background:"var(--s2)",borderRadius:10,border:"1px solid var(--bl)",marginBottom:12}}>
+                <div style={{display:"flex",gap:8,marginBottom:8}}>
+                  <div style={{flex:1,height:4,borderRadius:2,background:"var(--pl)",transition:"background .3s"}}/>
+                  <div style={{flex:1,height:4,borderRadius:2,background:"var(--s3)"}}/>
+                </div>
+                <div style={{fontSize:11,color:"var(--t2)"}}>千问 AI 联网搜索小红书爆款笔记，拆解套路并推荐创作风格...</div>
+              </div>}
               <div className="it-tip">
                 <div className="it-tip-ic" style={{background:"#FFF0F1",color:"#FF2442"}}><I.Bulb/></div>
                 <div>
-                  <div className="it-tip-t">小红书爆款秘诀</div>
-                  <div className="it-tip-d">AI 将自动生成3篇不同风格的笔记，含标题、正文、标签和互动引导。先给价值再软植入，转化效果最佳。</div>
+                  <div className="it-tip-t">爆款驱动生成</div>
+                  <div className="it-tip-d">AI 自动推导搜索词 → 联网搜索真实爆款 → 拆解套路 → 推荐风格 → 你选风格后生成笔记</div>
                 </div>
               </div>
+              </>}
+
+              {/* 第二步：拆解完成，展示推荐风格 + 生成按钮 */}
+              {(xhsPhase==="analyzed"||xhsPhase==="generate"||xhsPhase==="done")&&<>
+              <div className="xhs-result">
+                {/* 拆解完成 banner — 原版 */}
+                <div style={{padding:"12px 14px",background:"var(--s2)",borderRadius:10,border:"1px solid var(--bl)",marginBottom:14}}>
+                  <div style={{fontSize:12,fontWeight:700,marginBottom:6,display:"flex",alignItems:"center",gap:6,color:"var(--t1)"}}><I.Check style={{color:"var(--p)"}}/> 爆款拆解完成</div>
+                  {xhsAnalysis&&<div style={{fontSize:11,color:"var(--t2)",lineHeight:1.7}}>
+                    {xhsAnalysis.searched_notes&&<>已搜索到 <b>{xhsAnalysis.searched_notes.length}</b> 篇爆款笔记</>}
+                    {xhsAnalysis.title_formulas&&<>，提炼 <b>{xhsAnalysis.title_formulas.length}</b> 个标题公式</>}
+                    {xhsAnalysis.winning_structures&&<>、<b>{xhsAnalysis.winning_structures.length}</b> 种爆款结构</>}
+                    {xhsAnalysis.opening_hooks&&<>、<b>{xhsAnalysis.opening_hooks.length}</b> 种开头 Hook</>}
+                    {xhsAnalysis.hot_hashtags&&<>，收录 <b>{xhsAnalysis.hot_hashtags.length}</b> 个热门标签</>}
+                    。AI 已完成深度拆解，请选择风格后生成笔记。
+                  </div>}
+                  <button className="xhs-resrch-btn" onClick={()=>{
+                    setXhsPhase("");setXhsAnalysis(null);setXhsAnalysisText("");setXhsRecStyles([]);setXhsSelStyles([]);
+                  }}><I.Refresh/> 重新搜索</button>
+                </div>
+
+                {/* 风格选择 */}
+                <div className="xhs-style-hd">
+                  <div className="xhs-style-hd-t">选择创作风格</div>
+                  <div className="xhs-style-hd-ct">已选 {xhsSelStyles.length} / {xhsRecStyles.length}</div>
+                </div>
+
+                <div className="xhs-style-list">
+                  {(()=>{const styleIcons={"干货教程":"📚","痛点共鸣":"💡","案例展示":"📊","经验分享":"💬","避坑指南":"🛡️","清单种草":"📋","对比测评":"⚖️","故事营销":"📖"};const badgeCls=m=>m==="高"?"s":m==="中"?"a":"b";const badgeTxt=m=>m==="高"?"S · 强推":m==="中"?"A · 推荐":"B · 可选";return xhsRecStyles.map((r,i)=>{const sel=xhsSelStyles.includes(r.style);return(
+                    <div key={i} className={`xhs-style-card${sel?" on":""}`} onClick={()=>setXhsSelStyles(prev=>prev.includes(r.style)?prev.filter(s=>s!==r.style):[...prev,r.style])}>
+                      <div className="xsc-top">
+                        <div className="xsc-ck">{sel&&<I.Check style={{color:"#fff",width:10,height:10}}/>}</div>
+                        <div className="xsc-ic">{styleIcons[r.style]||"✏️"}</div>
+                        <span className="xsc-name">{r.style}</span>
+                        <div className="xsc-right">
+                          {r.match&&<span className={`xsc-badge ${badgeCls(r.match)}`}>{badgeTxt(r.match)}</span>}
+                          {r.frequency&&<span className="xsc-freq">{r.frequency}</span>}
+                        </div>
+                      </div>
+                      {r.reason&&<div className="xsc-reason">{r.reason}</div>}
+                    </div>
+                  );})})()}
+                </div>
+
+                {xhsRecStyles.length===0&&<div style={{fontSize:11,color:"var(--t3)",textAlign:"center",padding:20,background:"var(--s2)",borderRadius:12,border:"1px dashed var(--b)"}}>未获取到推荐风格，请重新搜索</div>}
+              </div>
+
+              <button className="it-gen-btn" onClick={generateXhsNotes} disabled={xhsBusy||!xhsSelStyles.length} style={xhsBusy?{opacity:.7,cursor:"wait"}:!xhsSelStyles.length?{opacity:.5,cursor:"not-allowed"}:{}}>
+                {xhsBusy&&xhsPhase==="generate"?<><I.Sparkle/> 正在生成 {xhsSelStyles.length} 篇笔记...</>:<><I.Sparkle/> 生成 {xhsSelStyles.length} 篇笔记</>}
+              </button>
+              </>}
               </>:<>
               <div className="it-fg">
                 <div className="it-fg-l">标题 <span className="it-fg-ct">{itTitle.length}/30</span></div>
@@ -1570,6 +1703,12 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
           <div className="it-right">
             {itPlat==="小红书"&&xhsNotes.length>0?
             <div style={{width:"100%",maxWidth:520,display:"flex",flexDirection:"column",gap:14,paddingBottom:24}}>
+              {xhsAnalysis&&xhsAnalysis.searched_notes&&<div style={{padding:"14px 16px",background:"var(--s)",borderRadius:12,border:"1px solid var(--bl)",fontSize:11,color:"var(--t2)",lineHeight:1.8}}>
+                <div style={{fontWeight:700,marginBottom:6,display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--t1)"}}><I.Search/> 爆款拆解报告</div>
+                {xhsAnalysis.search_keywords&&<div style={{marginBottom:6}}>搜索词：{xhsAnalysis.search_keywords.slice(0,6).map((k,i)=><span key={i} style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:"var(--s3)",marginRight:4,marginBottom:2,fontSize:10}}>{k}</span>)}</div>}
+                <div>找到 <b>{xhsAnalysis.searched_notes.length}</b> 篇爆款笔记{xhsAnalysis.title_formulas&&<>，提炼 <b>{xhsAnalysis.title_formulas.length}</b> 个标题公式</>}{xhsAnalysis.winning_structures&&<>，<b>{xhsAnalysis.winning_structures.length}</b> 种内容结构</>}</div>
+                {xhsAnalysis.key_insights&&<div style={{marginTop:4,color:"var(--t3)"}}>{xhsAnalysis.key_insights.slice(0,2).join(" · ")}</div>}
+              </div>}
               <div className="xhs-tabs">
                 {xhsNotes.map((n,i)=>(
                   <button key={i} className={`xhs-tab ${xhsSel===i?"on":""}`} onClick={()=>setXhsSel(i)}>
@@ -1583,7 +1722,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                   <div className="xhs-card-hd-ic">XHS</div>
                   <div>
                     <div className="xhs-card-hd-t">{note.style||"小红书笔记"}</div>
-                    <div className="xhs-card-hd-d">{xhsProd} · AI 生成</div>
+                    <div className="xhs-card-hd-d">{xhsProd} · {xhsAnalysis?"基于爆款拆解生成":"AI 生成"}</div>
                   </div>
                 </div>
 
@@ -1601,9 +1740,12 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                 <div className="xhs-sec">
                   <div className="xhs-sec-t" style={{justifyContent:"space-between"}}>
                     <span>📄 正文内容</span>
-                    <button className="xhs-copy-btn" onClick={()=>navigator.clipboard.writeText(note.content||"")}><I.Copy/> 复制正文</button>
+                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                      <button className="xhs-copy-btn" onClick={()=>{setXhsEditIdx(xhsEditIdx===xhsSel?-1:xhsSel)}}><I.Edit/> {xhsEditIdx===xhsSel?"完成":"编辑"}</button>
+                      <button className="xhs-copy-btn" onClick={()=>navigator.clipboard.writeText(note.content||"")}><I.Copy/> 复制正文</button>
+                    </div>
                   </div>
-                  <div className="xhs-content">{note.content}</div>
+                  {xhsEditIdx===xhsSel?<textarea style={{width:"100%",minHeight:260,fontSize:13,lineHeight:1.85,color:"var(--t1)",fontFamily:"inherit",border:"1.5px solid var(--pl)",borderRadius:10,padding:"12px 14px",background:"var(--s2)",resize:"vertical",outline:"none"}} value={note.content||""} onChange={e=>{const v=e.target.value;setXhsNotes(prev=>prev.map((n,i)=>i===xhsSel?{...n,content:v}:n));}}/>:<div className="xhs-content">{note.content}</div>}
                 </div>
 
                 {note.hashtags?.length>0&&<div className="xhs-sec">
@@ -1639,9 +1781,9 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
             <div className="it-preview">
               {itPlat==="小红书"&&xhsBusy?
               <div className="it-pv-empty">
-                <div className="it-pv-ic" style={{animation:"spin 2s linear infinite",background:"#FFF0F1",color:"#FF2442"}}>📝</div>
-                <div className="it-pv-t">AI 正在创作小红书笔记...</div>
-                <div className="it-pv-d">正在分析产品特点，匹配爆款模式<br/>生成3篇不同风格的笔记，约需30秒</div>
+                <div className="it-pv-ic" style={{animation:"spin 2s linear infinite",background:"#FFF0F1",color:"#FF2442"}}>{xhsPhase==="search"?"🔍":"📝"}</div>
+                <div className="it-pv-t">{xhsPhase==="search"?"正在搜索同行爆款笔记...":"正在生成小红书笔记..."}</div>
+                <div className="it-pv-d">{xhsPhase==="search"?<>千问 AI 联网搜索小红书爆款<br/>拆解标题、结构、转化套路</>:<>基于真实爆款拆解报告<br/>Gemini 正在生成 {xhsSelStyles.length||3} 篇笔记</>}</div>
                 <div className="it-pv-skel">
                   <div className="it-pv-skel-line w60"/>
                   <div className="it-pv-skel-line w80"/>
@@ -1654,7 +1796,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
               <div className="it-pv-empty">
                 <div className="it-pv-ic">{itPlat==="小红书"?"📝":"✨"}</div>
                 <div className="it-pv-t">{itPlat==="小红书"?"等待生成小红书笔记":"等待生成预览"}</div>
-                <div className="it-pv-d">{itPlat==="小红书"?<>在左侧填写产品信息并点击<br/>"AI 生成小红书笔记" 即可生成</>:<>在左侧面板输入内容并点击<br/>"AI 智能排版" 即可查看效果</>}</div>
+                <div className="it-pv-d">{itPlat==="小红书"?<>在左侧填写产品信息并点击<br/>"搜索同行爆款" 开始分析</>:<>在左侧面板输入内容并点击<br/>"AI 智能排版" 即可查看效果</>}</div>
                 <div className="it-pv-skel">
                   <div className="it-pv-skel-line w60"/>
                   <div className="it-pv-skel-line w80"/>
