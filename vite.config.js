@@ -51,6 +51,16 @@ export default defineConfig({
         target: 'https://api.tikhub.io',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/tikhub-proxy/, '')
+      },
+      '/tmpfiles-proxy': {
+        target: 'https://tmpfiles.org',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/tmpfiles-proxy/, '')
+      },
+      '/blt-proxy': {
+        target: 'https://api.bltcy.ai',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/blt-proxy/, '')
       }
     }
   }

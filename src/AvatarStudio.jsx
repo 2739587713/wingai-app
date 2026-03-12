@@ -27,34 +27,40 @@ const I = {
 const API_BASE = "/api-proxy/v1";
 const API_KEY = "sk-QFvD052YMpEvAN3oBc7228BcD24a44FdB9A73f2a62BeDb3b";
 const hdrs = { "Content-Type": "application/json", Authorization: "Bearer " + API_KEY };
+// 柏拉图 - Kling video + TTS (via proxy to avoid CORS)
+const BLT_BASE = "/blt-proxy";
+const BLT_KEY = "sk-Nv52MunZZDBX0uiDD0RlrDvG9E2OaNlhiiJoTQKDn0Sd5uJe";
+const bltHdrs = { "Content-Type": "application/json", Authorization: "Bearer " + BLT_KEY };
 
 /* ═══ Preset avatars ═══ */
 const PRESETS = [
   { id: "p1", nm: "商务男", tags: "商务 · 正式 · 专业", gender: "male", age: "30-35", style: "写实", color: "#3B82F6",
     imgUrl: "/avatars/p1.png",
-    imgPrompt: "Professional headshot portrait of a Chinese businessman aged 30-35, wearing a navy blue suit with white shirt, clean-shaven, confident gentle smile, looking directly at camera, face occupying 60 percent of frame, soft studio lighting from front-left, shallow depth of field, plain light gray gradient background, shoulders and upper chest visible, natural skin texture, high resolution, photorealistic" },
+    imgPrompt: "Portrait photo of a 32 year old Chinese man in a dark navy suit and light blue shirt, taken with iPhone front camera, natural indoor lighting from a window, matte skin with no oil or shine, relaxed confident smile, looking straight at camera, head and shoulders framing, simple white wall background slightly out of focus, casual professional vibe, no heavy retouching, natural color grading" },
   { id: "p2", nm: "知性女", tags: "知性 · 优雅 · 职场", gender: "female", age: "28-32", style: "写实", color: "#8B5CF6",
     imgUrl: "/avatars/p2.png",
-    imgPrompt: "Professional headshot portrait of an elegant Chinese businesswoman aged 28-32, wearing a cream blazer, subtle professional makeup, warm soft smile, looking directly at camera, face occupying 60 percent of frame, soft even studio lighting, shallow depth of field, plain light beige gradient background, shoulders visible, natural skin texture, high resolution, photorealistic" },
+    imgPrompt: "Portrait photo of a 30 year old Chinese woman wearing a beige knit cardigan over white top, taken with iPhone front camera, soft natural daylight, matte skin with minimal natural makeup, gentle warm smile, looking straight at camera, head and shoulders framing, clean light gray wall background, approachable and intelligent look, no glamour filter, realistic skin texture" },
   { id: "p3", nm: "活力少女", tags: "青春 · 活泼 · 亲和", gender: "female", age: "20-24", style: "写实", color: "#EC4899",
     imgUrl: "/avatars/p3.png",
-    imgPrompt: "Headshot portrait of an energetic young Chinese woman aged 20-24, wearing a casual white t-shirt, bright cheerful smile showing teeth, youthful fresh look, looking directly at camera, face occupying 60 percent of frame, bright natural lighting, plain soft pink gradient background, shoulders visible, natural skin, high resolution, photorealistic" },
+    imgPrompt: "Portrait photo of a 22 year old Chinese girl wearing a simple white t-shirt, taken with iPhone front camera, bright natural daylight, clear fresh skin with barely any makeup, big genuine smile showing teeth, looking straight at camera, head and shoulders framing, plain light background, energetic youthful vibe, no beauty filter, natural and authentic look" },
   { id: "p4", nm: "儒雅大叔", tags: "稳重 · 信赖 · 权威", gender: "male", age: "42-48", style: "写实", color: "#14B8A6",
     imgUrl: "/avatars/p4.png",
-    imgPrompt: "Headshot portrait of a distinguished Chinese man aged 42-48, wearing thin-frame glasses and a dark gray turtleneck sweater, warm trustworthy expression with gentle smile, looking directly at camera, face occupying 60 percent of frame, soft warm studio lighting, plain dark gray gradient background, shoulders visible, natural skin texture, high resolution, photorealistic" },
+    imgPrompt: "Portrait photo of a 45 year old Chinese man wearing thin metal frame glasses and a charcoal crew neck sweater, taken with iPhone front camera, warm natural indoor lighting, matte skin with natural aging lines, kind trustworthy smile, looking straight at camera, head and shoulders framing, warm toned simple background, calm authoritative presence, no retouching, authentic look" },
   { id: "p5", nm: "甜美主播", tags: "甜美 · 种草 · 带货", gender: "female", age: "24-28", style: "写实", color: "#F59E0B",
     imgUrl: "/avatars/p5.png",
-    imgPrompt: "Headshot portrait of a cute Chinese female livestreamer aged 24-28, wearing a light pink knit top, sweet charming smile, subtle ring light reflection in eyes, looking directly at camera, face occupying 60 percent of frame, soft ring light illumination, plain soft white background, shoulders visible, light natural makeup, high resolution, photorealistic" },
+    imgPrompt: "Portrait photo of a 26 year old Chinese woman wearing a soft pink blouse, taken with ring light setup like a livestream studio, clean matte skin with light natural makeup, sweet friendly smile, looking straight at camera, head and shoulders framing, clean white background, warm and inviting look, natural color tones, no heavy beauty filter" },
 ];
 
-/* ═══ Voice options ═══ */
+/* ═══ Voice options (gpt-4o-mini-tts) ═══ */
 const VOICES = [
-  { id: "alloy", nm: "Alloy", desc: "中性·沉稳", gender: "neutral" },
+  { id: "coral", nm: "Coral", desc: "女声·温暖自然", gender: "female" },
+  { id: "sage", nm: "Sage", desc: "女声·沉稳知性", gender: "female" },
+  { id: "alloy", nm: "Alloy", desc: "中性·清晰", gender: "neutral" },
   { id: "echo", nm: "Echo", desc: "男声·温暖", gender: "male" },
-  { id: "fable", nm: "Fable", desc: "叙事·沉浸", gender: "male" },
-  { id: "onyx", nm: "Onyx", desc: "男声·深沉", gender: "male" },
-  { id: "nova", nm: "Nova", desc: "女声·温柔", gender: "female" },
+  { id: "ash", nm: "Ash", desc: "男声·稳重", gender: "male" },
+  { id: "ballad", nm: "Ballad", desc: "男声·磁性", gender: "male" },
   { id: "shimmer", nm: "Shimmer", desc: "女声·明亮", gender: "female" },
+  { id: "verse", nm: "Verse", desc: "中性·活泼", gender: "neutral" },
 ];
 
 /* ═══ Tone options ═══ */
@@ -201,7 +207,7 @@ const STYLES = `
 /* ═══ API helpers ═══ */
 const callGemini = async (prompt) => {
   const r = await fetch(API_BASE + "/chat/completions", { method: "POST", headers: hdrs,
-    body: JSON.stringify({ model: "gemini-2.5-flash-preview-05-20", messages: [{ role: "user", content: prompt }], temperature: 0.8 }) });
+    body: JSON.stringify({ model: "gemini-3.1-pro-preview", messages: [{ role: "user", content: prompt }], temperature: 0.8 }) });
   const d = await r.json();
   return d.choices?.[0]?.message?.content || "";
 };
@@ -225,35 +231,69 @@ const genImage = async (prompt, size = "1024x1536") => {
   }
 };
 
-const genTTS = async (text, voice = "nova", speed = 1.0) => {
-  const r = await fetch(API_BASE + "/audio/speech", { method: "POST", headers: hdrs,
-    body: JSON.stringify({ model: "tts-1-hd", input: text, voice, response_format: "mp3", speed }) });
+const genTTS = async (text, voice = "coral", speed = 1.0) => {
+  const r = await fetch(BLT_BASE + "/v1/audio/speech", { method: "POST", headers: bltHdrs,
+    body: JSON.stringify({ model: "gpt-4o-mini-tts", input: text, voice, response_format: "mp3", speed }) });
   if (!r.ok) throw new Error("TTS失败: " + (await r.text()).slice(0, 200));
   return URL.createObjectURL(await r.blob());
 };
 
-const genVideoCreate = async (prompt, size = "720x1280", seconds = "8") => {
-  const form = new FormData();
-  form.append("model", "veo-3.1");
-  form.append("prompt", prompt);
-  form.append("size", size);
-  form.append("seconds", seconds);
-  const r = await fetch(API_BASE + "/videos", { method: "POST", headers: { Authorization: "Bearer " + API_KEY }, body: form });
+const klingCreate = async (imageUrl, prompt, aspect = "9:16", duration = "5") => {
+  const r = await fetch(BLT_BASE + "/kling/v1/videos/image2video", {
+    method: "POST", headers: bltHdrs,
+    body: JSON.stringify({ model_name: "kling-v1", image: imageUrl, prompt, duration, aspect_ratio: aspect }),
+  });
   if (!r.ok) throw new Error("视频创建失败: " + (await r.text()).slice(0, 200));
-  return r.json();
+  const j = await r.json();
+  if (j.code !== 0) throw new Error(j.message || "创建失败");
+  return j.data.task_id;
 };
 
-const genVideoPoll = async (id, onProgress, signal) => {
+const klingPoll = async (taskId, pollPath, onProgress, signal) => {
   for (let i = 0; i < 120; i++) {
     if (signal?.aborted) throw new Error("已取消");
-    await new Promise(r => setTimeout(r, 3000));
-    const r = await fetch(API_BASE + "/videos/" + id, { headers: { Authorization: "Bearer " + API_KEY }, signal });
+    await new Promise(r => setTimeout(r, 4000));
+    const r = await fetch(`${BLT_BASE}${pollPath}/${taskId}`, { headers: bltHdrs, signal });
     const j = await r.json();
-    onProgress?.(j.progress || 0, j.status);
-    if (j.status === "completed") return j.video_url || j.url || j.result_url;
-    if (j.status === "failed") throw new Error(j.error?.message || "视频生成失败");
+    const st = j.data?.task_status;
+    const pct = st === "submitted" ? 10 : st === "processing" ? 50 : st === "succeed" ? 100 : 0;
+    onProgress?.(pct, st);
+    if (st === "succeed") {
+      const url = j.data?.task_result?.videos?.[0]?.url;
+      if (!url) throw new Error("未获取视频URL");
+      return url;
+    }
+    if (st === "failed") throw new Error(j.data?.task_status_msg || "生成失败");
   }
-  throw new Error("视频生成超时");
+  throw new Error("生成超时");
+};
+
+const klingLipSync = async (videoUrl, audioUrl) => {
+  const r = await fetch(BLT_BASE + "/kling/v1/videos/lip-sync", {
+    method: "POST", headers: bltHdrs,
+    body: JSON.stringify({ input: { video_url: videoUrl, audio_url: audioUrl, audio_type: "url", mode: "audio2video" } }),
+  });
+  if (!r.ok) throw new Error("对口型任务创建失败: " + (await r.text()).slice(0, 200));
+  const j = await r.json();
+  if (j.code !== 0) throw new Error(j.message || "对口型创建失败");
+  return j.data.task_id;
+};
+
+// Upload blob/local image or audio to tmpfiles.org to get a public URL
+const uploadToTmp = async (blobOrUrl, filename = "file") => {
+  let blob;
+  if (blobOrUrl instanceof Blob) {
+    blob = blobOrUrl;
+  } else {
+    const r = await fetch(blobOrUrl);
+    blob = await r.blob();
+  }
+  const form = new FormData();
+  form.append("file", blob, filename);
+  const up = await fetch("/tmpfiles-proxy/api/v1/upload", { method: "POST", body: form });
+  if (!up.ok) throw new Error("文件上传失败");
+  const j = await up.json();
+  return j.data.url.replace("tmpfiles.org/", "tmpfiles.org/dl/").replace("http://", "https://");
 };
 
 /* ══════════════════════════════════════
@@ -300,7 +340,10 @@ export default function AvatarStudio() {
   const [vidMsg, setVidMsg] = useState("");
   const [vidUrl, setVidUrl] = useState(null);
   const [vidProgress, setVidProgress] = useState(0);
+  const [comboPlaying, setComboPlaying] = useState(false);
   const vidAbortRef = useRef(null);
+  const vidRef = useRef(null);
+  const comboAudioRef = useRef(null);
 
   /* ─── State: Section collapse ─── */
   const [openSec, setOpenSec] = useState(1);
@@ -419,26 +462,71 @@ export default function AvatarStudio() {
   };
 
   /* ─── Step 4: Generate video ─── */
+  // Convert local image to JPEG base64 (compressed for API upload)
+  const imgToBase64 = (src) => new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = Math.min(img.width, 1024);
+      c.height = Math.round(c.width * img.height / img.width);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => reject(new Error("图片加载失败"));
+    img.src = src;
+  });
+
   const handleGenVideo = async () => {
     if (!avatarImg || !ttsUrl) return;
     const abort = new AbortController();
     vidAbortRef.current = abort;
-    setVidStep(1); setVidProgress(0); setVidMsg("正在创建视频任务...");
+    setVidStep(1); setVidProgress(0); setVidMsg("正在准备资源...");
     try {
-      const size = screen === "竖屏" ? "720x1280" : "1280x720";
-      const durSec = audioDur > 0 ? String(Math.min(12, Math.max(4, Math.ceil(audioDur)))) : "8";
-      const videoPrompt = `${sel.nm || "数字人"} speaking to camera: a person delivering a scripted monologue directly to the viewer, gentle natural head movements, subtle hand gestures, professional studio lighting, ${bgType === "纯色" ? `solid ${bgColor} background` : "blurred modern office background"}, upper body framing, cinematic quality, photorealistic`;
-      const created = await genVideoCreate(videoPrompt, size, durSec);
-      if (!created?.id) throw new Error("未获得视频任务ID");
-      setVidMsg(`视频生成中（ID: ${created.id.slice(-8)}）...`);
-      const url = await genVideoPoll(created.id, (prog, status) => {
-        setVidProgress(prog);
-        const statusMap = { queued: "排队中", in_progress: "生成中" };
-        setVidMsg(`${statusMap[status] || status}... ${prog}%`);
+      // 1. Get public URL for avatar image (Kling needs http(s) URL)
+      let imageUrl;
+      if (/^https?:\/\//.test(avatarImg)) {
+        imageUrl = avatarImg;
+      } else {
+        setVidMsg("正在上传头像图片...");
+        imageUrl = await uploadToTmp(avatarImg, "avatar.jpg");
+      }
+
+      // 2. Upload TTS audio to get a public URL for lip-sync
+      setVidMsg("正在上传语音文件...");
+      const ttsBlob = await (await fetch(ttsUrl)).blob();
+      const audioPublicUrl = await uploadToTmp(ttsBlob, "tts.mp3");
+
+      // 3. Create base video with Kling image2video
+      const aspect = screen === "竖屏" ? "9:16" : "16:9";
+      const dur = audioDur > 0 ? String(Math.min(10, Math.max(5, Math.ceil(audioDur)))) : "5";
+      const bgDesc = bgType === "纯色" ? "plain simple background" : bgType === "办公室" ? "modern office" : bgType === "直播间" ? "livestream studio" : "blurred background";
+      const scriptHint = script.slice(0, 60).replace(/["\n]/g, " ");
+      const prompt = `This person is talking directly to camera, presenting about "${scriptHint}", natural head movements, slight expressions changes, ${bgDesc}, casual Douyin vlog style`;
+
+      setVidMsg("正在创建基础视频...");
+      const vid1TaskId = await klingCreate(imageUrl, prompt, aspect, dur);
+      setVidMsg("基础视频生成中（约2-3分钟）...");
+      const baseVideoUrl = await klingPoll(vid1TaskId, "/kling/v1/videos/image2video", (prog, status) => {
+        setVidProgress(Math.round(prog * 0.6)); // 0-60%
+        const m = { submitted: "已提交", processing: "基础视频生成中", succeed: "基础视频完成" };
+        setVidMsg(`${m[status] || status}... ${Math.round(prog * 0.6)}%`);
       }, abort.signal);
-      setVidUrl(url);
+
+      // 4. Apply lip-sync with TTS audio
+      setVidMsg("正在创建对口型任务...");
+      setVidProgress(65);
+      const lsTaskId = await klingLipSync(baseVideoUrl, audioPublicUrl);
+      setVidMsg("对口型生成中（约2分钟）...");
+      const finalUrl = await klingPoll(lsTaskId, "/kling/v1/videos/lip-sync", (prog, status) => {
+        setVidProgress(65 + Math.round(prog * 0.35)); // 65-100%
+        const m = { submitted: "对口型已提交", processing: "对口型生成中", succeed: "完成" };
+        setVidMsg(`${m[status] || status}... ${65 + Math.round(prog * 0.35)}%`);
+      }, abort.signal);
+
+      setVidUrl(finalUrl);
       setVidStep(2); setVidProgress(100);
-      setVidMsg("视频生成完成！");
+      setVidMsg("视频生成完成！嘴型已与语音同步。");
     } catch (e) {
       if (e.name === "AbortError" || e.message === "已取消") { setVidStep(0); setVidMsg(""); }
       else { setVidStep(-1); setVidMsg("生成失败: " + e.message); }
@@ -461,6 +549,21 @@ export default function AvatarStudio() {
       resetDownstream(2); setOpenSec(2);
     } catch (e) { setCErr("生成失败: " + e.message); }
     finally { setCBusy(false); }
+  };
+
+  /* ─── Play lip-synced video (audio already baked in) ─── */
+  const handlePlayCombo = () => {
+    const v = vidRef.current;
+    if (!v) return;
+    if (comboPlaying) {
+      v.pause();
+      setComboPlaying(false);
+    } else {
+      v.currentTime = 0;
+      v.play();
+      setComboPlaying(true);
+      v.onended = () => setComboPlaying(false);
+    }
   };
 
   /* ─── Section render helper (not a component, avoids remount) ─── */
@@ -548,11 +651,12 @@ export default function AvatarStudio() {
             <div className={`avs-ph ${screen === "横屏" ? "land" : ""}`}>
               <div className="avs-ph-in">
                 {screen === "竖屏" && <div className="avs-ph-notch" />}
-                {vidUrl ? <video src={vidUrl} controls loop style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                {vidUrl ? <video ref={vidRef} src={vidUrl} loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   : avatarImg ? <img src={avatarImg} alt="avatar" />
                   : <div className="avs-empty"><I.Camera /><span>选择形象并点击「生成形象图片」</span></div>}
                 {imgLoading && <div className="avs-loading"><span className="avs-spin" /><span style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>AI 生成形象中...</span></div>}
                 {vidStep === 1 && !imgLoading && <div className="avs-loading"><span className="avs-spin" /><span style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>视频生成中 {vidProgress}%</span></div>}
+                {vidUrl && !imgLoading && vidStep !== 1 && <div className="avs-playbtn" onClick={handlePlayCombo}>{comboPlaying ? <I.Pause /> : <I.Play />}</div>}
                 {avatarImg && ttsUrl && !vidUrl && !imgLoading && vidStep !== 1 && <div className="avs-playbtn" onClick={togglePlay}>{isPlaying ? <I.Pause /> : <I.Play />}</div>}
                 <div className="avs-ph-bar" />
               </div>
