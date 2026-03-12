@@ -1,5 +1,46 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { execFile } from 'child_process'
+import { readFile, unlink } from 'fs/promises'
+import { join } from 'path'
+import { randomUUID } from 'crypto'
+
+/* ═══ Edge TTS plugin (Python edge-tts via child process) ═══ */
+function edgeTTSPlugin() {
+  return {
+    name: 'edge-tts',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        if (req.method !== 'POST' || req.url !== '/edge-tts') return next()
+        console.log('[edge-tts] request received')
+        let body = ''
+        for await (const chunk of req) body += chunk
+        try {
+          const { text, voice = 'zh-CN-XiaoxiaoNeural', rate = '+0%', pitch = '+0Hz' } = JSON.parse(body)
+          if (!text) { res.writeHead(400); res.end('missing text'); return }
+          const tmpFile = join(process.cwd(), `.tts_${randomUUID().slice(0, 8)}.mp3`)
+          console.log(`[edge-tts] generating: voice=${voice} text=${text.slice(0, 30)}...`)
+          await new Promise((resolve, reject) => {
+            const args = ['-m', 'edge_tts', '--text', text, '--voice', voice, '--rate', rate, '--pitch', pitch, '--write-media', tmpFile]
+            execFile('python', args, { timeout: 60000 }, (err, stdout, stderr) => {
+              if (err) { console.error('[edge-tts] exec error:', err.message, stderr); reject(err) }
+              else resolve()
+            })
+          })
+          const audio = await readFile(tmpFile)
+          await unlink(tmpFile).catch(() => {})
+          console.log(`[edge-tts] ${voice}: ${audio.length} bytes`)
+          res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': audio.length })
+          res.end(audio)
+        } catch (e) {
+          console.error('[edge-tts] error:', e.message)
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: e.message }))
+        }
+      })
+    }
+  }
+}
 
 function urlExpandPlugin() {
   return {
@@ -39,7 +80,7 @@ function urlExpandPlugin() {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), urlExpandPlugin()],
+  plugins: [react(), urlExpandPlugin(), edgeTTSPlugin()],
   server: {
     proxy: {
       '/api-proxy': {

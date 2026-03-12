@@ -51,16 +51,17 @@ const PRESETS = [
     imgPrompt: "Portrait photo of a 26 year old Chinese woman wearing a soft pink blouse, taken with ring light setup like a livestream studio, clean matte skin with light natural makeup, sweet friendly smile, looking straight at camera, head and shoulders framing, clean white background, warm and inviting look, natural color tones, no heavy beauty filter" },
 ];
 
-/* ═══ Voice options (gpt-4o-mini-tts) ═══ */
+/* ═══ Voice options (Edge TTS) ═══ */
 const VOICES = [
-  { id: "coral", nm: "Coral", desc: "女声·温暖自然", gender: "female" },
-  { id: "sage", nm: "Sage", desc: "女声·沉稳知性", gender: "female" },
-  { id: "alloy", nm: "Alloy", desc: "中性·清晰", gender: "neutral" },
-  { id: "echo", nm: "Echo", desc: "男声·温暖", gender: "male" },
-  { id: "ash", nm: "Ash", desc: "男声·稳重", gender: "male" },
-  { id: "ballad", nm: "Ballad", desc: "男声·磁性", gender: "male" },
-  { id: "shimmer", nm: "Shimmer", desc: "女声·明亮", gender: "female" },
-  { id: "verse", nm: "Verse", desc: "中性·活泼", gender: "neutral" },
+  { id: "zh-CN-XiaoxiaoNeural", nm: "晓晓", desc: "女声·温暖自然", gender: "female" },
+  { id: "zh-CN-XiaoyiNeural", nm: "晓依", desc: "女声·活泼甜美", gender: "female" },
+  { id: "zh-CN-XiaochenNeural", nm: "晓辰", desc: "女声·知性优雅", gender: "female" },
+  { id: "zh-CN-XiaohanNeural", nm: "晓涵", desc: "女声·温柔大方", gender: "female" },
+  { id: "zh-CN-XiaoruiNeural", nm: "晓睿", desc: "女声·沉稳专业", gender: "female" },
+  { id: "zh-CN-YunjianNeural", nm: "云健", desc: "男声·磁性低沉", gender: "male" },
+  { id: "zh-CN-YunxiNeural", nm: "云希", desc: "男声·阳光活力", gender: "male" },
+  { id: "zh-CN-YunxiaNeural", nm: "云夏", desc: "男声·少年清爽", gender: "male" },
+  { id: "zh-CN-YunyangNeural", nm: "云扬", desc: "男声·新闻播音", gender: "male" },
 ];
 
 /* ═══ Tone options ═══ */
@@ -231,9 +232,11 @@ const genImage = async (prompt, size = "1024x1536") => {
   }
 };
 
-const genTTS = async (text, voice = "coral", speed = 1.0) => {
-  const r = await fetch(BLT_BASE + "/v1/audio/speech", { method: "POST", headers: bltHdrs,
-    body: JSON.stringify({ model: "gpt-4o-mini-tts", input: text, voice, response_format: "mp3", speed }) });
+const genTTS = async (text, voice = "zh-CN-XiaoxiaoNeural", speed = 1.0) => {
+  const rate = speed === 1.0 ? "+0%" : (speed > 1 ? `+${Math.round((speed - 1) * 100)}%` : `-${Math.round((1 - speed) * 100)}%`);
+  const r = await fetch("/edge-tts", { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, voice, rate }) });
   if (!r.ok) throw new Error("TTS失败: " + (await r.text()).slice(0, 200));
   return URL.createObjectURL(await r.blob());
 };
@@ -324,7 +327,7 @@ export default function AvatarStudio() {
   const [duration, setDuration] = useState("30s");
   const [ctaType, setCta] = useState("关注");
   const [script, setScript] = useState("");
-  const [voice, setVoice] = useState("nova");
+  const [voice, setVoice] = useState("zh-CN-XiaoxiaoNeural");
   const [speed, setSpeed] = useState(1.0);
   const [bgType, setBgType] = useState("纯色");
   const [bgColor, setBgColor] = useState("#F5F5F5");
@@ -419,6 +422,9 @@ export default function AvatarStudio() {
     try {
       const durInfo = DURATIONS.find(d => d.id === duration) || DURATIONS[1];
       const toneInfo = TONES.find(t => t.id === tone) || TONES[0];
+      const wordRange = durInfo.words; // e.g. "240-300字"
+      const maxWords = parseInt(wordRange.split("-")[1]) || 150;
+      const minWords = parseInt(wordRange.split("-")[0]) || 60;
       const prompt = `你是一位专业短视频口播文案策划师。请根据以下信息生成一段数字人口播文案。
 
 【数字人形象】${sel.nm}（${sel.tags}）
@@ -426,20 +432,38 @@ export default function AvatarStudio() {
 【目标受众】${audience || "泛人群"}
 【核心卖点/要点】${keyPoints || "无特别指定"}
 【语气风格】${toneInfo.label}
-【目标时长】${durInfo.label}（约${durInfo.words}）
+【目标时长】${durInfo.label}
 【结尾引导】${ctaType}
 
+【最重要！字数要求】
+- 总字数必须在 ${minWords}-${maxWords} 个中文字之间
+- 这是硬性限制，多一个字都不行
+- 写完后请自己数一遍字数，确保不超过 ${maxWords} 字
+
 【写作要求】
-1. 纯口播文案，只输出文案正文，不要画面描述、标题、标注
-2. 100% 口语化，短句为主（每句≤15字），多用语气词（啊、哦、对吧、真的）
-3. 字数严格控制在 ${durInfo.words} 范围内
-4. 开头第一句必须有悬念/痛点/反问来留住观众（禁止"大家好我是XXX"类开场）
-5. 中间层层递进，每2-3句一个节奏切换
-6. 结尾用${ctaType}作为行动引导，自然不生硬
-7. 适合${sel.gender === "male" ? "男性" : "女性"}声音朗读
-8. 像真人自然说话，禁止书面语、文学词、标题体`;
-      const result = await callGemini(prompt);
-      setScript(result.replace(/^["""「」『』\s]+|["""「」『』\s]+$/g, "").trim());
+1. 只输出文案正文，不要标题、标注、字数统计、任何额外说明
+2. 100% 口语化，短句为主（每句≤15字），多用语气词
+3. 开头必须有悬念/痛点/反问（禁止"大家好我是XXX"类开场）
+4. 中间层层递进，每2-3句一个节奏切换
+5. 结尾用${ctaType}作为行动引导
+6. 适合${sel.gender === "male" ? "男性" : "女性"}声音朗读
+7. 像真人自然说话，禁止书面语`;
+      let result = (await callGemini(prompt)).replace(/^["""「」『』\s]+|["""「」『』\s]+$/g, "").trim();
+      // Strip any trailing word-count notes AI might add
+      result = result.replace(/[\n\r]+[\s]*[\(（【\[].*字.*[\)）】\]][\s]*$/g, "").trim();
+      // If significantly over limit, hard truncate at sentence boundary
+      const cjkCount = result.replace(/[^\u4e00-\u9fff\u3000-\u303f]/g, "").length;
+      if (cjkCount > maxWords * 1.3) {
+        const sentences = result.split(/(?<=[。！？\n])/);
+        let truncated = "", cnt = 0;
+        for (const s of sentences) {
+          const sc = s.replace(/[^\u4e00-\u9fff\u3000-\u303f]/g, "").length;
+          if (cnt + sc > maxWords) break;
+          truncated += s; cnt += sc;
+        }
+        result = truncated.trim();
+      }
+      setScript(result);
       resetDownstream(3);
       setOpenSec(isPreset ? 2 : 3);
     } catch (e) { alert("文案生成失败: " + e.message); }
