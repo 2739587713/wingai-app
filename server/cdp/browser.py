@@ -18,6 +18,9 @@ from utils.anti_detect import STEALTH_JS
 
 log = logging.getLogger(__name__)
 
+# Bypass system proxy for local CDP connections
+_no_proxy = {"http": None, "https": None}
+
 # Track allocated ports
 _port_counter = 0
 
@@ -38,7 +41,7 @@ def _next_port():
         _port_counter = (_port_counter + 1) % 100
         # Check if port is already in use
         try:
-            r = requests.get(f"http://127.0.0.1:{port}/json/version", timeout=0.5)
+            r = requests.get(f"http://127.0.0.1:{port}/json/version", timeout=0.5, proxies=_no_proxy)
             if r.ok:
                 log.info(f"Port {port} already in use, skipping")
                 continue
@@ -110,7 +113,7 @@ def launch_chrome(profile_dir: str | None = None, headless=False) -> tuple[subpr
     # Wait for CDP to be ready
     for i in range(30):
         try:
-            r = requests.get(f"http://127.0.0.1:{port}/json/version", timeout=1)
+            r = requests.get(f"http://127.0.0.1:{port}/json/version", timeout=1, proxies=_no_proxy)
             if r.ok:
                 log.info(f"Chrome ready on port {port}")
                 return proc, port
@@ -124,15 +127,15 @@ def launch_chrome(profile_dir: str | None = None, headless=False) -> tuple[subpr
 
 def get_ws_url(port: int, tab_index=0) -> str:
     """Get WebSocket URL for a browser tab."""
-    r = requests.get(f"http://127.0.0.1:{port}/json", timeout=5)
+    r = requests.get(f"http://127.0.0.1:{port}/json", timeout=5, proxies=_no_proxy)
     tabs = r.json()
     # Filter to page tabs
     pages = [t for t in tabs if t.get("type") == "page"]
     if not pages:
         # Open a new tab
-        requests.get(f"http://127.0.0.1:{port}/json/new", timeout=5)
+        requests.get(f"http://127.0.0.1:{port}/json/new", timeout=5, proxies=_no_proxy)
         time.sleep(0.5)
-        r = requests.get(f"http://127.0.0.1:{port}/json", timeout=5)
+        r = requests.get(f"http://127.0.0.1:{port}/json", timeout=5, proxies=_no_proxy)
         pages = [t for t in r.json() if t.get("type") == "page"]
     if tab_index >= len(pages):
         tab_index = 0
@@ -150,7 +153,7 @@ class CDPSession:
         self._listener_task = None
 
     async def connect(self, ws_url: str):
-        self.ws = await websockets.connect(ws_url, max_size=50 * 1024 * 1024)
+        self.ws = await websockets.connect(ws_url, max_size=50 * 1024 * 1024, proxy=None)
         self._listener_task = asyncio.create_task(self._listen())
         # Enable required domains
         await self.send("Page.enable")

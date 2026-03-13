@@ -54,21 +54,23 @@ const TEMPLATES=[
   {id:8,name:"AIDA营销模型",plat:"通用",desc:"Attention引起注意 - Interest产生兴趣 - Desire激发欲望 - Action促成行动",badges:[{t:"完播率 +24%",c:"conv"},{t:"经典模型",c:"auth"}]},
 ];
 const SCRIPTS=[
-  {id:1,name:"实验对比型",dur:"45s",shots:8,sell:3,desc:"通过前后效果强烈对比，快速建立用户信任，适合新品推广",badges:[{t:"转化率 +20%",c:"conv"},{t:"高转化",c:"auth"}],logic:["痛点挖掘：识别用户肌肤问题","产品引入：展示产品特性","效果对比：前后状态强烈对比","信任背书：用户好评+专业认证","行动号召：引导购买决策"],
-   table:[{shot:1,dur:"3秒",scene:"模特面部特写，显示问题肌肤",copy:"肌肤问题严重，急需改善",risk:true,intent:"黄金3秒吸睛"},{shot:2,dur:"5秒",scene:"产品包装特写",copy:"这款面膜蕴含XX精华，温和不刺激",risk:false,intent:"产品展示"},{shot:3,dur:"8秒",scene:"面膜敷在脸上",copy:"15分钟深层滋养，肌肤瞬间水润",risk:false,intent:"使用过程"},{shot:4,dur:"6秒",scene:"取下面膜",copy:"看，肌肤立刻水嫩透亮",risk:false,intent:"效果展示"},{shot:5,dur:"7秒",scene:"前后对比分屏",copy:"前后对比如此明显",risk:false,intent:"强烈对比"},{shot:6,dur:"5秒",scene:"好评截图",copy:"千万用户见证",risk:false,intent:"社会证明"},{shot:7,dur:"6秒",scene:"价格信息",copy:"现在下单享受8折",risk:false,intent:"价格优势"},{shot:8,dur:"5秒",scene:"购买按钮",copy:"立即购买",risk:false,intent:"行动召唤"}]},
-  {id:2,name:"痛点故事型",dur:"50s",shots:10,sell:4,desc:"通过真实生活场景引发共鸣",badges:[{t:"曝光量 +35%",c:"exp"},{t:"高曝光",c:"exp"}],logic:["场景代入","情感共鸣","转折引入","效果见证"],table:[]},
-  {id:3,name:"专家测评型",dur:"55s",shots:12,sell:5,desc:"专业角度分析成分功效，建立权威性",badges:[{t:"转化率 +15%",c:"conv"},{t:"专业权威",c:"auth"}],logic:["专家背书","成分解析","实验验证","用户反馈"],table:[]},
+  {id:1,name:"凌晨3点的急救面膜",dur:"45s",shots:7,sell:3,desc:"用「熬夜党自救」共鸣切入，制造强烈代入感后反转种草",badges:[{t:"完播率杀手",c:"exp"},{t:"痛点驱动",c:"conv"},{t:"情感共鸣",c:"exp"}],logic:["情绪0→9 | 痛点炸弹：用极致真实的疲态画面制造代入感","情绪9→7 | 战术目的：放大焦虑，让用户对号入座","情绪7→7 | 引入解决方案+制造悬念，闺蜜推荐社交货币","情绪7→10 | 产品体验视觉化，展示质地和使用感受","情绪8→10 | 效果对比冲击，「一夜之间」的巨大反差","情绪10→9 | 社交验证+真实性，用对话形式引爆信任","情绪9→8 | 行动号召：制造稀缺+建立「我们自己人」的认同感"],
+   table:[{shot:1,dur:"3秒",scene:"【类型：场景氛围图】【大特写·固定】深夜书桌场景，电脑屏幕散发幽蓝冷光映在桌面上，旁边散落着空咖啡杯和揉皱的纸巾，桌角一盏台灯发出昏黄微光，整体疲惫压抑氛围【冷白调偏青】【转场】从黑屏硬切闪入",copy:"凌晨3点刚下班...【重】看看这张脸，简直没法看了！",risk:false,intent:"情绪0→9 | 战术目的：痛点炸弹，用极致真实的疲态感制造强代入，瞬间击中目标用户（熬夜党）| 完播策略：开头即冲突，0.5秒内制造认知共鸣",image_prompt:"dark moody desk scene at 3am, cold blue laptop screen glow illuminating messy desk surface, crumpled tissues, empty coffee cup, dim warm desk lamp in corner, lonely exhausted atmosphere, cinematic still life, cool blue-grey color palette with warm amber accent, Sony 35mm f/1.4, shallow depth of field, rule of thirds composition, editorial lifestyle photography, melancholic mood"},{shot:2,dur:"4秒",scene:"【类型：质地微距】【中景·固定】浴室洗手台场景，惨白日光灯顶光照射下，台面上零散放着几瓶护肤品，镜子上有水雾痕迹，一条毛巾随意搭在台边，整体凌乱但真实的生活感【惨白调】【转场】硬切",copy:"又干又黄...毛孔粗得能插秧...真的，我都不敢照镜子。",risk:false,intent:"情绪9→7 | 战术目的：放大焦虑，通过具体化描述让用户对号入座 | 完播策略：连续痛点轰炸维持注意力",image_prompt:"bathroom vanity scene under harsh fluorescent overhead light, scattered skincare bottles on white marble countertop, foggy mirror with water streaks, towel draped casually over edge, raw unfiltered morning-after feeling, stark cool white lighting from above, clinical atmosphere, Canon 50mm f/1.8, centered composition, realistic lifestyle photography, slightly desaturated cool tones"},{shot:3,dur:"5秒",scene:"【类型：产品英雄镜头】【特写·缓慢推进】一双手从画面外将一盒面膜推入画面中央，面膜盒放在凌乱的化妆台上，背景是零散的化妆品瓶瓶罐罐。面膜包装袋发出清脆的「撕拉」质感光泽【色调从冷白转为柔和暖光】【转场】快速硬切转场",copy:"还好...我闺蜜偷偷塞给我这个，一用就上瘾了！【重】千万别连续用，会上瘾！",risk:false,intent:"情绪7→7 | 战术目的：引入解方案+制造悬念。用闺蜜推荐建立社交货币信任，「会上瘾」制造好奇心缺口 | 完播策略：悬念钩子让人想知道为什么会上瘾",image_prompt:"elegant face mask box being gently pushed into frame center on cluttered vanity table, scattered beauty products softly blurred in background, mask packaging catching light with premium sheen, transition from cool to warm lighting, soft key light from right side, beauty product commercial style, Nikon 85mm f/1.4, shallow bokeh, warm amber transitioning from cool blue, luxury skincare campaign aesthetic"},{shot:4,dur:"5秒",scene:"【类型：质地微距】【大特写·缓慢推进】面膜纸被缓缓展开的过程，镜头捕捉到精华液像蜂蜜一样浓稠地拉丝、滴落。下一镜，面膜轻柔地敷上模型皮肤（只露额头和鼻梁局部），能看到气泡被抚平、精华液渗透的慢动作，水光在表面流动推开形成波纹【干净透亮的暖白调】【转场】水波纹特效转场",copy:"你看这精华液！【重】满满当当的！敷上去冰冰凉凉...哦...有点爽，那种被救的感觉都没了！",risk:false,intent:"情绪7→10 | 战术目的：展示核心卖点（精华丰盈、体验视觉化），将产品体验感官化，通过「冰凉」「被救」等词让用户产生向往 | 完播策略：ASMR级画面+感官描述制造沉浸",image_prompt:"extreme macro shot of face mask sheet being unfolded, thick honey-like serum stretching and dripping in slow motion, glistening translucent essence with visible air bubbles, next shot showing mask smoothly applied on skin surface with serum spreading in ripple patterns, clean bright warm white lighting, backlit to show serum translucency, macro 100mm f/2.8, super shallow focus, warm pearl-white palette, premium beauty commercial for Vogue, water droplet crystal clarity"},{shot:5,dur:"4秒",scene:"【类型：对比概念图】【匹配剪辑】画面变黑后转为第二天清晨场景：阳光透过百叶窗洒在柔软枕头上，形成温暖的光影条纹；旁边梳妆镜反射出柔和晨光，桌上放着用过的面膜包装和一杯热气腾腾的咖啡【温暖的晨曦暖色调，金色调】【转场】光线遮挡转场",copy:"我就敷了15分钟...【重】第二天早上！你敢信？！",risk:false,intent:"情绪8→10 | 战术目的：效果对比冲击。利用「一夜之间」的巨大反差完成高潮爆发，用「你敢信？！」的反问句式，把震惊的情绪直接传给观众 | 完播策略：反转高潮是全片最高能记忆点",image_prompt:"beautiful morning scene transition, warm golden sunlight streaming through venetian blinds casting striped shadows on soft white pillow, vanity mirror reflecting warm dawn light, used face mask packet and steaming coffee cup on table, cozy awakening atmosphere, golden hour side lighting, Canon 35mm f/1.4, warm golden-amber palette, lifestyle editorial photography, hopeful radiant mood, Japanese morning aesthetic"},{shot:6,dur:"5秒",scene:"【类型：场景氛围图】【中景·固定】明亮的办公室日光环境，办公桌上放着面膜盒和一杯水，手机屏幕亮着显示微信对话界面（文字模糊不可读），旁边放着一束小雏菊，窗外是蓝天白云【明亮清新调】【转场】硬切",copy:"（压低声音，像说悄悄话）结果今天上班...同事过来说「你最近是不是谈恋爱了？皮肤也太好了吧！」...哈哈她哪知道啊！",risk:false,intent:"情绪10→9 | 战术目的：社交验证+强化真实性。用「同事认不出」的对话场景制造social proof，用人际互动把产品效果转化为社交货币 | 完播策略：八卦式叙述引爆代入感",image_prompt:"bright modern office desk scene in daylight, face mask box and glass of water on clean white desk, smartphone screen glowing with chat interface blurred, small bouquet of daisies in simple vase, blue sky and clouds visible through window, fresh optimistic atmosphere, natural window light from left, bright airy color palette with white and soft blue, Canon 50mm f/1.8, clean minimal composition, Korean office lifestyle aesthetic"},{shot:7,dur:"4秒",scene:"【类型：产品英雄镜头】【中景·固定】产品盒放在温暖居家环境中，旁边是一杯热饮和一本翻开的书，柔和的暖光从侧面打过来，整体温馨有格调。产品盒旁放着一个小卡片写着模糊文字（暗示链接）【温暖居家调】【转场】缓慢淡出到黑屏",copy:"就这个！【重】熬夜脸的亲妈！我先囤了...链接放这儿了，不买也先收藏，早晚用得上呢？",risk:false,intent:"情绪9→8 | 战术目的：行动号召。不用「赶紧下单」硬推，用「我先囤了」建立「我们自己人」认同感+「早晚用得上」制造稀缺暗示 | 完播策略：轻松收尾不制造压力，提高转化意愿",image_prompt:"cozy home setting product hero shot, face mask box placed on warm wooden side table next to steaming mug and open book, soft warm side lighting creating gentle shadows, homey comfortable atmosphere with knitted blanket texture visible, product box catching warm golden light, intimate evening scene, Sony 85mm f/1.8, warm amber and cream palette, rule of thirds with product at golden ratio point, hygge lifestyle photography, warm inviting mood"}]},
+  {id:2,name:"闺蜜掏心话——我花了3000块踩的坑今天全告诉你",dur:"50s",shots:7,sell:4,desc:"用「踩坑经历」建立信任，真实感拉满的闺蜜种草",badges:[{t:"评论区炸弹",c:"exp"},{t:"强信任",c:"auth"},{t:"种草力强",c:"conv"}],logic:["好奇9→震惊7 | 用「花了3000块」制造信息缺口","震惊7→焦虑8 | 展示踩坑产品的失败画面，放大焦虑","焦虑8→期待7 | 转折引入，悬念式介绍本品","期待7→惊喜10 | 质地展示+使用体验高潮","惊喜10→信任9 | 效果对比+数据支撑","信任9→认同8 | 价格锚定，制造超值感","认同8→行动8 | 闺蜜式软逼单"],
+   table:[{shot:1,dur:"3秒",scene:"【类型：平铺排列】【俯拍·固定】桌面上杂乱地摆放着七八瓶不同的护肤品空瓶，有的倒着有的盖子开着，旁边散落着购物小票和快递包装碎片，形成一种「买了一堆交了智商税」的视觉冲击【冷灰调，略微过曝显得廉价】【转场】从黑屏闪切",copy:"我跟你说啊...这3000块...【重】全是智商税！别笑，真的！",risk:false,intent:"好奇9→震惊7 | 战术目的：用「3000块智商税」制造认知冲突+信息缺口 | 完播策略：金额+自嘲制造强烈好奇心",image_prompt:"overhead flat lay of messy desk with 7-8 empty skincare bottles scattered chaotically, some fallen over with caps off, crumpled shopping receipts and torn delivery packaging scattered around, wasteful messy arrangement suggesting regret, cold grey-blue desaturated tones, slightly overexposed harsh overhead light, iPhone-style casual flat lay, 24mm wide angle overhead, editorial still life with deliberate chaos, consumer regret aesthetic"},{shot:2,dur:"5秒",scene:"【类型：质地微距】【大特写·固定】一个透明塑料瓶中的乳液质地看起来稀薄如水，倒在玻璃板上迅速散开没有粘稠度；另一镜是膏状产品厚重地堆在皮肤纹理模型上，看起来闷闷的不透气【对比冷灰调】【转场】快速硬切",copy:"这个...涂上去跟水一样，完全没用。那个呢？闷痘！一夜之间全爆了...",risk:false,intent:"震惊7→焦虑8 | 战术目的：通过踩坑细节建立「过来人」信任度，同时放大用户对选错产品的焦虑 | 完播策略：具体踩坑经历比泛泛而谈更抓人",image_prompt:"split comparison macro shots: first shows thin watery lotion spreading rapidly on glass surface like water with no viscosity, second shows thick heavy cream piled on textured skin model looking suffocating and greasy, clinical test feeling, cold grey-blue laboratory lighting, macro 100mm f/2.8 lens, stark unflattering harsh light, before-solution comparison photography, medical dermatology documentation style"},{shot:3,dur:"5秒",scene:"【类型：产品英雄镜头】【特写·缓慢推进】画面突然变亮变暖，产品面膜盒从暗处被推入一束温暖的聚光灯下，光线在包装表面缓缓流动，周围其他杂物渐渐虚化消失，只剩产品在光芒中央【从冷灰突变暖金调】【转场】闪白过渡",copy:"直到...有一天我在小红书刷到这个...当时想，反正也不贵，死马当活马医吧。",risk:false,intent:"焦虑8→期待7 | 战术目的：经典转折点，用「不抱希望」反而制造更大期待 | 完播策略：光线色调突变制造视觉记忆锚点",image_prompt:"dramatic product reveal shot, face mask box emerging from darkness into warm spotlight beam, light slowly flowing across premium packaging surface creating golden reflections, surrounding clutter gradually dissolving into soft bokeh, sharp transition from cold grey to warm golden amber tones, single key light from above-right, cinematic product hero shot, Hasselblad 80mm f/2.8, centered dramatic composition, luxury brand campaign reveal moment, aspirational warm glow"},{shot:4,dur:"8秒",scene:"【类型：质地微距】【大特写·缓慢推进】精华液从面膜袋中挤出，浓稠度像融化的蜂蜜，在光线下呈现半透明的琥珀色泽；下一镜展示精华在玻璃板上的拉丝效果，丝线在光中闪烁；再一镜是精华滴落在丝绸面料上缓缓被吸收的过程【温暖透亮的蜜色调】【转场】叠化",copy:"你看这个精华...【重】挤出来就知道不一样！拉丝拉丝！浓稠度刚刚好...往脸上一敷...哇那个贴合感...",risk:false,intent:"期待7→惊喜10 | 战术目的：ASMR级质地展示，将使用体验视觉化，用「拉丝」等感官词制造种草冲动 | 完播策略：微距+慢动作是短视频最容易制造沉浸感的手法",image_prompt:"luxurious serum macro sequence: thick honey-like essence being squeezed from mask packet, amber translucent viscosity catching backlight, next shot showing serum string-pulling effect on glass with light sparkling through threads, final shot of golden serum droplet slowly absorbing into silk fabric surface, warm honey-amber color palette throughout, backlit rim lighting creating golden glow, macro 100mm f/2.8 with extension tube, ultra shallow depth of field, premium cosmetics commercial for Dior, sensory luxury aesthetic"},{shot:5,dur:"5秒",scene:"【类型：对比概念图】【中景·固定】左右对比构图：左边是一朵干枯发黄的玫瑰放在灰暗背景下；右边同一朵玫瑰（替换为鲜艳绽放的）在明亮温暖光线下，花瓣上有晶莹水珠。中间用一道光线做自然分隔【左冷右暖的对比色调】【转场】匹配剪辑（花瓣展开动态）",copy:"用了一周...我室友以为我去打了水光针！【重】就这效果，一片才几块钱...你说气不气人？",risk:false,intent:"惊喜10→信任9 | 战术目的：用隐喻对比（枯花→鲜花）代替真人before/after，更适合AI生成且视觉冲击更强 | 完播策略：价格反差引发分享欲",image_prompt:"split composition before-after concept: left side shows wilted yellowing rose on dark moody grey background, right side shows same rose variety in full vibrant bloom with crystal water droplets on petals under warm bright light, natural light beam creating dividing line between two halves, left cold desaturated blue-grey vs right warm vibrant pink-coral, Canon 85mm f/1.4, symmetrical split composition, conceptual beauty transformation photography, poetic metaphor style"},{shot:6,dur:"5秒",scene:"【类型：平铺排列】【俯拍·固定】精心排列的flat lay：面膜产品居中，周围放着计算器（显示模糊数字暗示省钱）、一小堆硬币、几朵干花、一张手写卡片，整体像杂志编辑图【清新明亮调】【转场】硬切",copy:"算一下哈...外面做一次水光针大几千吧？这个一盒才XX块，能用一个月...【重】数学好的自己算！",risk:false,intent:"信任9→认同8 | 战术目的：价格锚定，用水光针几千vs面膜几十的巨大反差制造超值感 | 完播策略：互动式话术引发评论",image_prompt:"curated flat lay arrangement: face mask box centered, surrounded by vintage calculator showing blurred numbers, small pile of gold coins, dried flowers, handwritten note card, all on clean white marble surface, magazine editorial styling, bright natural overhead light with soft shadows, warm clean palette with gold accents, Canon 50mm f/1.8 overhead, symmetric centered composition, Marie Claire beauty editorial flat lay, aspirational yet accessible mood"},{shot:7,dur:"4秒",scene:"【类型：产品英雄镜头】【中景·固定】温暖的卧室床头场景，面膜盒放在床头柜上，旁边是一盏亮着暖光的小台灯和一杯牛奶，被子微微掀开一角，营造「睡前护肤仪式」的温馨感【暖黄调】【转场】缓慢淡出",copy:"反正我是【重】已经囤了三盒了...链接就在下面，不买也收藏一下吧，省得到时候找不到问我！",risk:false,intent:"认同8→行动8 | 战术目的：用「已经囤了三盒」代替硬推，建立从众心理；「省得找我」制造紧迫感但不施压 | 完播策略：温暖收尾提高好感度和转化率",image_prompt:"cozy bedroom nightstand product placement, face mask box on wooden bedside table next to warm glowing small lamp and glass of milk, duvet corner slightly turned down inviting sleep, creating bedtime skincare ritual atmosphere, warm amber-yellow bedroom lighting, intimate cozy mood, Sony 50mm f/1.4, warm golden-cream palette, off-center composition with negative space, Kinfolk magazine lifestyle aesthetic, hygge bedtime comfort"}]},
+  {id:3,name:"成分党请进——我把配料表翻译成人话了",dur:"55s",shots:7,sell:5,desc:"用「翻译配料表」的知识型内容建立专业权威，适合理性消费者",badges:[{t:"完播率 +35%",c:"exp"},{t:"专业权威",c:"auth"},{t:"评论区炸弹",c:"exp"}],logic:["好奇8→专注9 | 用配料表谜面制造知识缺口","专注9→恍然7 | 逐个翻译成分，建立专业感","恍然7→震撼9 | 核心成分深度解读，权威背书","震撼9→信任10 | 实验感对比，数据说话","信任10→认同9 | 用户口碑堆叠","认同9→行动8 | 理性逼单"],
+   table:[]},
 ];
 const SHOTS=[
-  {text:"看这面膜每一片啊，全都这个肤感可温和可水润了。敏感肌学生党约会前别慌！",note:"单片面膜展示特写"},
-  {text:"上次久重逢我脸干到爆皮，室友丢给我的这个，敷完又白又嫩。",note:"手部展示面膜质地"},
-  {text:"这种温和配方，连敏感肌都能安心使用，补水效果立竿见影。",note:"多片面膜组合陈列"},
-  {text:"现在库存有限，前100名下单还送同系列眼膜，赶紧抢购吧！",note:"产品包装及赠品展示"},
-  {text:"记得点击下方链接，现在下单享受限时优惠价格，错过就没有了哦！",note:"购买按钮特写及倒计时"},
+  {text:"凌晨3点刚下班...看看这张脸，简直没法看了！还好闺蜜塞给我这个...",note:"【产品英雄镜头】面膜盒在深夜书桌场景中，电脑蓝光映衬，冷白调转暖",imgPrompt:"face mask box on dark desk with blue laptop glow, transitioning warm light, cinematic moody product shot, 35mm f/1.4"},
+  {text:"你看这精华液！满满当当的！敷上去冰冰凉凉...那种被救的感觉...",note:"【质地微距】精华液蜂蜜般拉丝滴落，大特写，暖白调透光",imgPrompt:"extreme macro honey-like serum stretching and dripping, backlit golden translucency, 100mm macro f/2.8, luxury cosmetics commercial"},
+  {text:"敷了15分钟...第二天早上！你敢信？！同事问我是不是去打了水光针...",note:"【对比概念图】枯萎玫瑰vs绽放玫瑰的对比，左冷右暖分割构图",imgPrompt:"split composition: wilted yellow rose on dark grey left vs vibrant blooming rose with water droplets on warm right, light beam divider, 85mm f/1.4, poetic transformation concept"},
+  {text:"算一下哈...做一次水光针大几千？这个一盒才几十块，能用一个月！",note:"【平铺排列】面膜+计算器+硬币+干花的杂志风flat lay，俯拍清新调",imgPrompt:"curated flat lay: mask box centered, vintage calculator, gold coins, dried flowers on white marble, bright overhead light, Canon 50mm, magazine editorial style"},
+  {text:"反正我已经囤了三盒了...链接放这儿了，不买也先收藏，早晚用得上！",note:"【产品英雄镜头】温暖卧室床头场景，面膜盒+台灯+牛奶，暖黄调",imgPrompt:"cozy bedside product shot, mask box next to warm lamp and milk glass, golden bedroom lighting, Sony 50mm f/1.4, hygge lifestyle aesthetic"},
 ];
 const REFS=[
-  {tag:"极致数 · 肌肤奢享",color:"#DC2626",bg:"#FEE2E2",dur:"56s",text:"肌肤暗沉无光，是不是让你失去了自信光芒？...",more:"+4个镜头"},
-  {tag:"创意款 · 场景种草",color:"#2563EB",bg:"#DBEAFE",dur:"56s",text:"工作、学习、社交，每天步履不停，肌肤也跟着疲惫暗沉...",more:"+4个镜头"},
+  {tag:"深夜急救 · 熬夜党自救",color:"#DC2626",bg:"#FEE2E2",dur:"45s",text:"凌晨3点刚下班...看看这张脸！还好闺蜜偷偷塞给我这个...",more:"+6个镜头"},
+  {tag:"踩坑实录 · 3000块教训",color:"#2563EB",bg:"#DBEAFE",dur:"50s",text:"这3000块全是智商税！别笑，直到我在小红书刷到这个...",more:"+6个镜头"},
 ];
 const PROJECTS=[
   {id:1,title:"玻尿酸面膜 · 种草视频",desc:"实验对比型 · 60秒",status:"done",st:"已完成",tmpl:"实验对比型",date:"3天前",shots:8},
@@ -122,6 +124,7 @@ const NAV=[
 
 export default function App(){
   const [pg,setPg]=useState("dash");
+  const activeCreatePg=useRef(null); // tracks ongoing creation: "create" or "create-deep"
   const [modal,setModal]=useState(false);
   const [mStep,setMStep]=useState(0);
   const [mMode,setMMode]=useState("quick");
@@ -1378,7 +1381,7 @@ ${styleList}
   };
 
   const startCreate=async()=>{
-    setModal(false);setPg("create");setCs("ai-generating");setAiScripts([]);
+    setModal(false);setPg("create");setCs("ai-generating");setAiScripts([]);activeCreatePg.current="create";
     const tmplInfo=libSelTmpl?[
       `套用博主模板「${libSelTmpl.name}」`,
       libSelTmpl.style_summary&&`【整体风格】${libSelTmpl.style_summary}`,
@@ -1407,38 +1410,74 @@ ${styleList}
     try{
       // ═══ 第一步：千问联网搜索同品类爆款短视频，提炼爆款模式 ═══
       setAiGenStep("正在搜索全网同品类爆款短视频，分析流量密码...");
-      const trendRaw=await callLLM({model:"qwen3-max",system:"你是一位在MCN机构工作8年的短视频操盘手，亲手打造过50+百万粉账号。你擅长通过搜索引擎找到最新爆款并像庖丁解牛一样拆解它们。你的分析不是学术论文，而是实操手册。",prompt:`搜索分析「${prod}」（品类：${cat||"通用"}）在抖音/快手/小红书的最新爆款短视频。
+      // ── 1A：千问联网搜索爆款短视频 ──
+      setAiGenStep("正在联网搜索同品类爆款短视频...");
+      const searchRaw=await callLLM({model:"qwen3-max",system:"你是一位在MCN机构工作8年的短视频操盘手，亲手打造过50+百万粉账号。你擅长通过搜索引擎找到最新爆款并逐帧拆解。",prompt:`你是一位资深短视频数据分析师。请完成以下任务：
 
-爆款定义（符合任一即可）：
-- 点赞量 ≥ 10万
-- 低粉爆款：账号粉丝 < 5万 但单条点赞 > 1万
-- 近30天内的高互动视频（评论率 > 3%）
+【第一步：智能选词】
+根据产品「${prod}」（品类：${cat||"通用"}），自主推导出6-10个最有效的搜索关键词，覆盖：
+- 产品直接关键词（如"面膜推荐"）
+- 品类词（如"护肤品测评"）
+- 受众痛点词（如"熬夜脸怎么救"）
+- 场景词（如"约会前急救"）
+- 爆款话术词（如"别买XX了"）
 
-请完成以下深度拆解：
+【第二步：联网搜索爆款视频】
+用上面推导的关键词，联网搜索抖音/快手/小红书上的真实爆款短视频。
 
-一、搜索并列出5-8个真实爆款案例
-每个案例必须包含：标题/概述、预估数据（点赞/评论/转发）、账号粉丝量级、视频时长、爆款核心原因（不是泛泛而谈，要具体到"这条视频前3秒用了XX手法制造了XX情绪"）
+📊 爆款判定标准（满足任意2条即算爆款）：
+① 低粉爆款：账号粉丝<5万，单条点赞>1万——纯靠内容质量起量，最值得学习
+② 高互动率：评论数≥点赞数×5%——说明内容引发真实讨论
+③ 高转发率：转发数≥点赞数×3%——说明有社交传播价值
+④ 万赞级爆款：点赞≥10万——绝对量级爆款
+⑤ 时效爆款：近60天内发布且点赞≥5000——代表当前算法偏好
+⑥ 品类头部：该细分品类下播放/互动排名前列的视频
 
-二、逐帧级别的爆款共性拆解
-- 前3秒钩子库：至少列出6种已验证的开头类型，每种给出2个真实案例原文。分析为什么这些钩子有效（制造了什么认知冲突/情绪/好奇心缺口）
-- 内容结构拓扑：不只是"痛点→方案→效果"这种粗线条。要拆到每个节点的情绪值（0-10）、节奏（快/慢/停顿）、画面（特写/全景/对比/动态）——画出"情绪过山车"
-- 画面语言规律：运镜偏好（固定/手持/推拉）、色调趋势（该品类爆款偏暖还是偏冷？）、转场节奏（平均几秒切一次？高潮处怎么处理？）、特效使用频率
-- 台词节奏DNA：爆款台词的句子长度分布、语气词使用频率、停顿位置规律、重音模式、口头禅/catchphrase
-- 转化心理学：不同阶段用了什么心理触发器（稀缺性/社会认同/权威效应/损失厌恶/锚定效应）
+🔍 额外关注：
+- 同一作者多篇爆款要重点分析——方法论可复用
+- 纯画面+旁白类视频（非真人口播）要特别标注——这是我们的制作方式
+- 区分"投流假爆款"和"自然流量真爆款"
 
-三、提炼4-5种该品类的「已验证爆款脚本类型」
-每种类型给出：名称、核心结构公式、典型情绪曲线、适用场景、代表案例、预估完播率区间
+请尽量找到8-12条符合条件的爆款视频。
 
-四、AI纯画面制作适配方案
-我们的视频制作方式是：AI生成产品大片级画面 + TTS旁白配音，不使用真人出镜。类似高级种草号/好物号的风格。
-请分析：
-- 上述爆款中哪些视觉元素可以用AI图片生成器完美复刻？（产品特写、质地微距、场景氛围、概念对比图等）
-- 如何把需要真人的部分转化为AI可实现的画面？（如"主播试用"→"产品质地流动的微距特写"+"旁白描述使用感受"）
-- 该品类最适合的AI画面风格是什么？（杂志广告风/电影感/极简/赛博/日系等）
+【第三步：逐帧级深度拆解】
+对找到的爆款视频逐一拆解，重点分析：
 
-注意：如果搜索不到特定品类的案例，搜索所属大类的爆款规律。宁可分析透3个真实案例，也不要编造虚假数据。
+1. 前3秒钩子：完整还原开头台词+画面，分析为什么能留住人（制造了什么认知冲突/好奇心缺口/情绪冲击）
+2. 内容结构公式：拆到每个节点的情绪值(0-10)、节奏(快/慢/停)、画面类型(特写/全景/对比)——画出完整"情绪过山车"
+3. 台词节奏DNA：句子长度、语气词频率、停顿位置、重音模式、口头禅、catchphrase
+4. 画面语言：运镜偏好、色调趋势、转场节奏（几秒切一次）、高潮处的视觉处理
+5. 转化心理学：各阶段用了什么心理触发器（稀缺性/社会认同/权威/损失厌恶/锚定）
+6. 逼单话术：怎么引导下单的，原话是什么，为什么不让人反感
 
-直接输出分析文本，不需要JSON格式。`,temperature:0.3,maxTokens:6144,enableSearch:true});
+【第四步：提炼已验证脚本类型 + 画面风格建议】
+- 总结4-5种该品类验证过的爆款脚本类型（名称+结构公式+情绪曲线+代表案例）
+- 这些爆款的核心视觉叙事手法是什么？（什么画面最有冲击力）
+- 品类爆款的视觉风格趋势（色调偏好、构图特点、节奏快慢）
+- 如果要用纯画面+旁白的方式制作（不用真人出镜），怎么保留同样的冲击力？
+
+注意：宁可分析透3个真实案例，也不要编造数据。如果搜不到特定品类案例，搜索所属大类的规律。
+
+直接输出分析文本，不需要JSON格式。`,temperature:0.3,maxTokens:8192,enableSearch:true});
+
+      // ── 1B：用千问搜索竞品爆款视频的具体台词和画面 ──
+      setAiGenStep("正在深挖竞品爆款台词和画面细节...");
+      const scriptDetailRaw=await callLLM({model:"qwen3-max",system:"你是短视频文案拆解专家，擅长从爆款视频中提取可复用的台词模板和画面脚本。",prompt:`基于「${prod}」（${cat||"通用"}），联网搜索并还原3-5条同品类爆款短视频的完整脚本。
+
+对每条视频，请尽量还原：
+1. 完整台词文案（逐句，标注停顿和语气变化）
+2. 每句台词对应的画面描述（镜头怎么拍的、画面里有什么）
+3. 视频的节奏节点（哪里快切、哪里慢放、哪里停顿、BGM变化点）
+4. 评论区高赞评论前3条（反映观众真实反应）
+
+如果无法还原完整台词，至少提供：
+- 前3秒的完整开头台词
+- 转化/逼单部分的完整台词
+- 全片最高能的1-2句金句
+
+这些真实台词将作为后续脚本创作的参考模板。`,temperature:0.3,maxTokens:4096,enableSearch:true});
+
+      const trendRaw=searchRaw+"\n\n══════ 竞品爆款台词还原 ══════\n"+scriptDetailRaw;
 
       // ═══ 第二步：基于爆款分析设计4个差异化脚本大纲 ═══
       setAiGenStep("爆款分析完成，正在设计脚本结构...");
@@ -1465,7 +1504,7 @@ ${tmplInfo?`\n参考风格档案：\n${tmplInfo}`:""}
 4. name字段不是"方案一"！是像爆款标题一样让人忍不住点进去的一句话，例如："我花了3000块踩的坑，今天全告诉你""把XX扔了吧，这个才XX块"
 5. hook字段要写出完整的前3秒台词+画面设计，不是概述
 6. structure不是泛泛的步骤名，而是每一步的情绪值(0-10)+核心动作，如："好奇心炸弹(9)→产品特写揭秘(7)→效果对比冲击(10)→价格锚定(8)→紧迫逼单(9)"
-7. ⚠️ 画面全部由AI图片生成器制作+TTS旁白配音，绝对不能有真人出镜/口播/表情/手部操作！只能用：产品英雄镜头、质地微距、成分可视化、场景氛围空镜、before/after概念对比、flat lay平铺、局部虚化暗示。参考"种草号""好物推荐号"的纯画面+旁白风格
+7. 先按最火爆的视频来设计画面逻辑（什么画面最抓人、最有冲击力），然后再适配成AI图片生成+TTS旁白配音的方式。核心是爆款逻辑不能丢——需要真人的画面用场景氛围/产品特写/局部暗示来替代表达，但情绪冲击力和视觉叙事节奏必须跟真正的爆款视频一样强
 
 JSON输出：
 {"outlines":[{"name":"像爆款标题一样有冲击力的方案名（20字内）","type":"脚本类型（从爆款分析提炼）","emotion":"情绪走法：用曲线描述如 高开(9)→回落(5)→二次冲击(10)→收割(8)","shots":6,"strategy":"核心心理触发器+卖点策略","hook":"前3秒完整设计：画面(XX镜头+XX画面)+台词(完整台词文字)","diff":"与其他方案的本质区别（一句话）","structure":["情绪值+步骤动作","情绪值+步骤动作"]}]}`;
@@ -1507,41 +1546,37 @@ ${riskRules}
 ⑦ 逼单话术不要硬邦邦。不说"赶紧下单"，要说"反正我已经囤了三瓶了""链接我放这儿了，不买也先收藏，早晚用得上"
 ⑧ 台词与画面的配合：旁白描述的内容要与当前画面呼应但不重复——画面是产品特写时，旁白说功效/体验；画面是氛围图时，旁白制造情绪/讲故事；画面是对比图时，旁白给数据/证据${tmplInfo?`\n⑨ 植入产品名+至少2个「${creatorName}」标志性用词和说话习惯`:""}
 
-══════ 画面描述规则（scene字段）— AI生图专用 ══════
-⚠️ 核心原则：所有画面必须是AI图片生成器能高质量完成的！这是旁白配音视频，不是真人口播！
+══════ 画面描述规则（scene字段）══════
+【第一优先级：爆款视觉逻辑】
+先按最火爆的短视频来设计画面——什么画面最抓眼球、最有冲击力、最能配合台词制造情绪高潮，就写什么。
+你要像一个百万粉短视频导演一样思考每个镜头的视觉叙事：
+- 前3秒的画面必须有视觉冲突（对比、反差、悬念、出乎意料的构图）
+- 产品出场要有"仪式感"——不是随便放那儿，是像电影主角登场一样有灯光、有铺垫
+- 高潮镜头要有视觉爆发力（质地特写、效果对比、超近距离微距）
+- 转场要跟情绪走——情绪突变用硬切/闪白，情绪延续用叠化/匹配剪辑
+- 每个镜头的色调要配合情绪：焦虑用冷灰、希望用暖金、高潮用饱和、信任用清透
 
-【绝对禁止的画面类型】——AI做不好，写了也白写：
-✗ 真人正脸/表情/口型（"主播微笑展示"→ 禁止！AI人脸恐怖谷）
-✗ 精细手部操作（"手指涂抹产品"→ AI手指会畸形）
-✗ 多人互动场景（"闺蜜对话"→ AI人物关系混乱）
-✗ 文字/数字/LOGO（"屏幕显示价格"→ AI文字会乱码）
-✗ 复杂肢体动作（"拆箱""涂抹""按压泵头"→ 动作会变形）
+【第二优先级：适配AI生成画面】
+设计好爆款画面后，用以下方式转化为AI图片生成器能高质量实现的表达：
+- 需要真人出镜的画面 → 用场景氛围图、产品特写、局部暗示（肩颈/背影/发丝虚化）来替代，旁白负责传递"人"的部分
+- 需要动作的画面 → 用动作的结果/痕迹来暗示（撕开的包装、流淌的精华、敷过的面膜折痕、桌上的空瓶）
+- 需要文字/数字 → 用视觉隐喻替代（硬币堆→省钱、枯花vs鲜花→效果对比）
+- 需要表情 → 用环境情绪替代（凌乱桌面→疲惫、晨光卧室→舒适、整洁梳妆台→自信）
 
-【AI擅长的高质量画面类型】——只能从这些类型中选：
-① 产品英雄镜头：产品放在精心布置的场景中，像广告大片（大理石台面/鲜花环绕/光影交错/水滴质感）
-② 质地微距：乳液质地、粉末散落、液体流动、气泡、结晶——极致放大到抽象美感
-③ 成分可视化：原料食材/植物/矿物的艺术化呈现（薰衣草田、蜂蜜流淌、冰川融水）
-④ 场景氛围图：传递情绪的空镜——晨光浴室、雨后窗台、咖啡馆角落、城市霓虹
-⑤ 对比概念图：before/after用抽象表达（枯萎vs绽放的花、混浊vs清澈的水、灰暗vs明亮的光线）
-⑥ 平铺排列：产品+配件+装饰物的knolling flat lay俯拍，像杂志编辑图
-⑦ 局部暗示：只拍肩颈/后背/发丝/手腕（避开正脸和手指），虚化处理，暗示使用感受
-⑧ 数据图形化：用视觉隐喻代替数字——堆叠的硬币→省钱、上升的阶梯→效果、满溢的杯子→超值
-
-每个scene必须写明：
-1.【类型】上述8类中选一个
-2.【景别+运镜】大特写/特写/中景/全景/俯拍 + 固定/缓慢推进/缓慢拉远（AI视频只适合缓慢运镜）
-3.【具体画面】不要"产品展示"→要"磨砂玻璃精华瓶斜放在湿润的黑色石板上，瓶身凝结细密水珠，一束侧逆光穿过瓶身折射出琥珀色光斑，背景是失焦的绿色蕨类植物"
-4.【色调】冷白调/暖橘/电影青橙/高级灰/莫兰迪/赛博霓虹
-5.【转场】叠化/淡入淡出/闪白/匹配剪辑（前后画面构图相似的无缝切换）
+每个scene写明：
+1.【景别+运镜】大特写/特写/中景/全景/俯拍 + 运镜方式
+2.【画面内容】按爆款逻辑写出最有冲击力的画面，然后用AI可实现的元素来表达
+3.【色调氛围】配合情绪的视觉基调
+4.【转场】配合情绪节奏的转场方式
+5.【声画配合】这个画面配合什么样的旁白节奏（快说/慢说/停顿/重音处画面怎么配合）
 
 ══════ AI生图提示词（image_prompt字段）══════
-纯英文，给gpt-image-1/Midjourney的专业指令，60-100词：
-- 绝对不要出现：face, smile, expression, fingers, hand holding, person talking, mouth, eyes, portrait
-- 产品描述要具体："a frosted glass serum bottle with gold cap, 45-degree angle, dewy condensation droplets on surface, sitting on wet black slate"
-- 人物只能用极度虚化/局部：blurred silhouette in background, out-of-focus shoulder, soft-focus hair from behind, anonymous feminine neck and collarbone
-- 必须包含：lighting setup（rim light/key light/golden hour/neon glow具体灯位）, lens specs（macro 100mm f/2.8 / 85mm f/1.4 / 35mm wide）, color palette, composition（rule of thirds/centered/negative space）
-- 风格锚定词：commercial product photography for Vogue, cinematic still life, Apple-style minimalism, Korean beauty editorial, Japanese wabi-sabi aesthetic, luxury brand campaign
-- 连续镜头间要有视觉节奏变化：特写→全景→微距→氛围，冷调→暖调交替
+纯英文，60-100词。把上面设计好的爆款画面翻译成AI生图指令：
+- 必须包含：场景主体、光线设计（rim light/key light/golden hour等）、镜头参数（lens mm, aperture）、色调、构图法则、风格参考
+- 产品描述要具体但不带品牌名
+- 避免生成正脸和手指细节（AI弱项），用虚化/局部/背影/剪影代替
+- 风格参考要精准：commercial photography, cinematic still life, editorial style等
+- 连续镜头间要有视觉节奏变化
 
 ══════ 情绪&意图设计（intent字段）══════
 不要写"情绪：低→中"这种废话。要写：
@@ -2560,8 +2595,8 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
             <div className={`sb-i ${isActive(it.k)?"on":""} ${it.accent?"accent":""}`}
               onClick={()=>{
                 if(it.action==="modal"){
-                  // If already in a creation flow, just go back to it instead of opening new modal
-                  if(pg==="create"||pg==="create-deep") setPg(pg);
+                  // If there's an ongoing creation session, resume it instead of opening new modal
+                  if(activeCreatePg.current){setPg(activeCreatePg.current);}
                   else openModal();
                 }
                 else setPg(it.k);
@@ -2609,7 +2644,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                   <div className="bn-mode-t">快速模式</div>
                   <div className="bn-mode-d">30秒生成脚本，填写信息即可</div>
                 </div>
-                <div className="bn-mode" onClick={()=>{setPg("create-deep");setCs("input");}}>
+                <div className="bn-mode" onClick={()=>{setPg("create-deep");setCs("input");activeCreatePg.current="create-deep";}}>
                   <div className="bn-mode-ic"><I.Bot/></div>
                   <div className="bn-mode-t">深度定制</div>
                   <div className="bn-mode-d">AI顾问对话式深度挖掘需求</div>
@@ -3997,7 +4032,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
         {/* CREATE PAGE */}
         {pg==="create"&&cs!=="storyboard"&&<div className="sw">
           <div className="sl">
-            <div className="sl-hd"><div className="sl-bk" onClick={()=>setPg("dash")}><I.ArrowL/> 返回工作台</div><div style={{fontSize:15,fontWeight:700}}>脚本创作</div><button style={{marginLeft:"auto",padding:"4px 10px",borderRadius:6,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontFamily:"inherit"}} onClick={openModal}><I.Plus/> 新创作</button></div>
+            <div className="sl-hd"><div className="sl-bk" onClick={()=>{activeCreatePg.current=null;setPg("dash");}}><I.ArrowL/> 返回工作台</div><div style={{fontSize:15,fontWeight:700}}>脚本创作</div><button style={{marginLeft:"auto",padding:"4px 10px",borderRadius:6,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontFamily:"inherit"}} onClick={openModal}><I.Plus/> 新创作</button></div>
             <div className="sl-sec"><div className="sl-lb">产品</div><div className="sl-vl">{prod}</div></div>
             <div className="sl-sec"><div className="sl-lb">品类</div><div className="sl-tag">{cat}</div></div>
             <div className="sl-sec"><div className="sl-lb">时长</div><div className="sl-vl">{dur}</div></div>
@@ -4241,7 +4276,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                 <div className="vp-info-t">{prod} · 脚本视频</div>
                 <div className="vp-info-meta"><span>⏱ {dur}</span><span>🎬 {sbShots.length}个分镜</span><span>📦 {cat}</span><span>⏳ 用时{sbElapsed}秒</span><span>🎙 {VOICES.find(v=>v.id===sbVoice)?.name||"晓晓"}</span></div>
                 <div className="vp-acts">
-                  <button className="vp-act pri" onClick={()=>setPg("dash")}><I.Check/> 确认完成</button>
+                  <button className="vp-act pri" onClick={()=>{activeCreatePg.current=null;setPg("dash");}}><I.Check/> 确认完成</button>
                   {finalVideoUrl&&<a href={finalVideoUrl} download={`${prod}_视频.mp4`} style={{textDecoration:"none"}}><button className="vp-act sec"><I.Download/> 导出视频</button></a>}
                   <button className="vp-act sec" onClick={()=>{setPg("schedule");}}><I.Copy/> 发布到排期</button>
                   <button className="vp-act sec" onClick={()=>setCs("storyboard")}><I.Edit/> 编辑分镜</button>
@@ -4255,7 +4290,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
         {/* DEEP CHAT CREATE */}
         {pg==="create-deep"&&<div className="sw">
           <div className="sl">
-            <div className="sl-hd"><div className="sl-bk" onClick={()=>setPg("dash")}><I.ArrowL/> 返回工作台</div><button style={{marginLeft:"auto",padding:"4px 10px",borderRadius:6,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontFamily:"inherit"}} onClick={openModal}><I.Plus/> 新创作</button></div>
+            <div className="sl-hd"><div className="sl-bk" onClick={()=>{activeCreatePg.current=null;setPg("dash");}}><I.ArrowL/> 返回工作台</div><button style={{marginLeft:"auto",padding:"4px 10px",borderRadius:6,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontFamily:"inherit"}} onClick={openModal}><I.Plus/> 新创作</button></div>
             <div className="dp-hd">
               <div className="dp-hd-t"><I.Bot/> AI 创作顾问</div>
               <div className="dp-hd-d">对话式深度挖掘你的创作需求</div>
@@ -4279,7 +4314,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
               </div>
               <div className="cbr"><input className="cin" placeholder="聊聊你的创意想法..." value={ci} onChange={e=>setCi(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send(ci)}}/><button className="cmb"><I.Mic/></button><button className="csb" onClick={()=>send(ci)}><I.Send/></button></div>
               {msgs.length>2&&<button className="cgb" onClick={async()=>{
-                setPg("create");setCs("ai-generating");setAiScripts([]);
+                setPg("create");setCs("ai-generating");setAiScripts([]);activeCreatePg.current="create";
                 try{
                   setAiGenStep("AI正在从对话中提取需求，生成脚本...");
                   const chatCtx=msgs.filter(m=>m.r==="user"||m.r==="bot").map(m=>`${m.r==="user"?"用户":"顾问"}：${m.c||""}`).join("\n");
@@ -4321,7 +4356,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
         </div>
         <div className="mdl-f"><div className="step-dots">{[0,2].map(i=><div key={i} className={`step-dot ${mStep===i?"on":""}`}/>)}</div><div style={{display:"flex",gap:8}}>
           {mStep===2&&<button className="bt bt-g" onClick={()=>setMStep(0)}>上一步</button>}
-          {mStep===0&&<button className="bt bt-p" onClick={()=>{if(mMode==="deep"){setModal(false);setPg("create-deep");setCs("input");}else setMStep(2);}}>下一步 <I.ArrowR/></button>}
+          {mStep===0&&<button className="bt bt-p" onClick={()=>{if(mMode==="deep"){setModal(false);setPg("create-deep");setCs("input");activeCreatePg.current="create-deep";}else setMStep(2);}}>下一步 <I.ArrowR/></button>}
           {mStep===2&&<button className="bt bt-p" onClick={startCreate}><I.Zap/> 生成脚本</button>}
         </div></div>
       </div></div>}

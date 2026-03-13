@@ -8,6 +8,7 @@ import json
 import logging
 
 from cdp.actions import upload_files, get_current_url, take_screenshot
+from services.ai_vision import find_and_click, get_page_analysis
 from utils.anti_detect import human_delay as delay
 
 log = logging.getLogger(__name__)
@@ -186,11 +187,88 @@ async def publish(session, task) -> str:
     log.info(f"[KS] Description verify: '{verify}'")
 
     # ── Step 4: Scroll to very bottom to reveal 发布 button ──
-    log.info("[KS] Scrolling to bottom")
-    for _ in range(8):
-        await session.evaluate("window.scrollBy(0, 500)")
-        await asyncio.sleep(0.4)
-    await asyncio.sleep(1)
+    # Kuaishou uses a fixed layout — window.scrollBy does NOT work.
+    # Must find the actual scrollable container and scroll it.
+    log.info("[KS] Analyzing page scroll structure")
+    scroll_info = await session.evaluate("""
+        (() => {
+            const results = [];
+            // Report ALL elements with scrollHeight > clientHeight
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                const diff = el.scrollHeight - el.clientHeight;
+                if (diff > 50 && el.clientHeight > 100) {
+                    const tag = el.tagName;
+                    const cls = (el.className || '').toString().substring(0, 40);
+                    const style = window.getComputedStyle(el);
+                    results.push(
+                        tag + '.' + cls
+                        + ' sh=' + el.scrollHeight + ' ch=' + el.clientHeight
+                        + ' ov=' + style.overflow + '/' + style.overflowY
+                    );
+                }
+            }
+            return results.join('\\n');
+        })()
+    """)
+    log.info(f"[KS] Scrollable elements:\\n{scroll_info}")
+
+    # Now scroll: try every possible method
+    log.info("[KS] Scrolling to bottom using all methods")
+    scroll_result = await session.evaluate("""
+        (() => {
+            const scrolled = [];
+
+            // Method 1: Find elements with overflow:auto/scroll and scroll them
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                const diff = el.scrollHeight - el.clientHeight;
+                if (diff > 50 && el.clientHeight > 100) {
+                    const style = window.getComputedStyle(el);
+                    const ov = style.overflow + style.overflowY;
+                    if (ov.includes('auto') || ov.includes('scroll')) {
+                        const before = el.scrollTop;
+                        el.scrollTop = el.scrollHeight;
+                        const after = el.scrollTop;
+                        const tag = el.tagName;
+                        const cls = (el.className || '').toString().substring(0, 30);
+                        scrolled.push('ov:' + tag + '.' + cls + ' ' + before + '->' + after);
+                    }
+                }
+            }
+
+            // Method 2: Scroll elements with overflow:hidden but large content
+            // (some frameworks use overflow:hidden + transform for scrolling)
+            for (const el of all) {
+                const diff = el.scrollHeight - el.clientHeight;
+                if (diff > 200 && el.clientHeight > 200) {
+                    const before = el.scrollTop;
+                    el.scrollTop = el.scrollHeight;
+                    const after = el.scrollTop;
+                    if (after > before) {
+                        const tag = el.tagName;
+                        const cls = (el.className || '').toString().substring(0, 30);
+                        scrolled.push('force:' + tag + '.' + cls + ' ' + before + '->' + after);
+                    }
+                }
+            }
+
+            // Method 3: window scroll
+            const wBefore = window.scrollY;
+            window.scrollTo(0, 99999);
+            const wAfter = window.scrollY;
+            scrolled.push('window:' + wBefore + '->' + wAfter);
+
+            // Method 4: html/body scroll
+            document.documentElement.scrollTop = document.documentElement.scrollHeight;
+            document.body.scrollTop = document.body.scrollHeight;
+            scrolled.push('html:' + document.documentElement.scrollTop + ' body:' + document.body.scrollTop);
+
+            return scrolled.join(' | ');
+        })()
+    """)
+    log.info(f"[KS] Scroll attempts: {scroll_result}")
+    await asyncio.sleep(2)
 
     # ── Step 5: Set scheduled time if needed ──
     if hasattr(task, 'scheduled_at') and task.scheduled_at:
@@ -259,8 +337,19 @@ async def publish(session, task) -> str:
             await asyncio.sleep(0.5)
 
     # ── Step 6: Click 发布 button (red button at bottom) ──
-    # Scroll to absolute bottom first
-    await session.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    # Scroll ALL scrollable containers to bottom
+    await session.evaluate("""
+        (() => {
+            const all = document.querySelectorAll('div, section, main');
+            for (const el of all) {
+                if (el.scrollHeight > el.clientHeight + 100 && el.clientHeight > 200) {
+                    el.scrollTop = el.scrollHeight;
+                }
+            }
+            window.scrollTo(0, document.body.scrollHeight);
+            document.documentElement.scrollTop = document.documentElement.scrollHeight;
+        })()
+    """)
     await asyncio.sleep(1)
 
     # Debug: list all buttons on page to understand what's available
@@ -269,8 +358,9 @@ async def publish(session, task) -> str:
             const btns = document.querySelectorAll('button');
             const info = [];
             for (const btn of btns) {
-                const t = btn.textContent.trim().substring(0, 20);
-                if (t) info.push(t + '|dis=' + btn.disabled + '|vis=' + (btn.offsetParent !== null));
+                const t = btn.textContent.trim().substring(0, 30);
+                const rect = btn.getBoundingClientRect();
+                if (t) info.push(t + '|dis=' + btn.disabled + '|vis=' + (btn.offsetParent !== null) + '|y=' + Math.round(rect.top));
             }
             return info.join(' ; ');
         })()
@@ -278,37 +368,43 @@ async def publish(session, task) -> str:
     log.info(f"[KS] All buttons on page: {btn_info}")
 
     log.info("[KS] Clicking 发布 button")
-    clicked = False
-    for attempt in range(5):
-        clicked = await session.evaluate("""
-            (() => {
-                const btns = document.querySelectorAll('button');
-                for (const btn of btns) {
-                    const text = btn.textContent.trim();
-                    // Match exact "发布" (the red publish button at bottom)
-                    if (text === '发布' && btn.offsetParent !== null && btn.offsetHeight > 0) {
-                        btn.scrollIntoView({ block: 'center' });
-                        if (btn.disabled) return 'disabled';
-                        btn.click();
-                        return 'clicked';
-                    }
-                }
-                return null;
-            })()
-        """)
-        if clicked == 'clicked':
-            log.info(f"[KS] 发布 clicked! (attempt {attempt+1})")
-            break
-        if clicked == 'disabled':
-            log.warning(f"[KS] 发布 button found but DISABLED (attempt {attempt+1})")
-            # Button is disabled — description might not be registered, wait and retry
-            await asyncio.sleep(3)
-            continue
-        log.info(f"[KS] 发布 not found, scrolling more (attempt {attempt+1})")
-        await session.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await asyncio.sleep(2)
 
-    if clicked != 'clicked':
+    # Method 1: JS text match (search ALL elements, not just <button>)
+    clicked = await session.evaluate("""
+        (() => {
+            // Search all possible clickable elements
+            const els = document.querySelectorAll('button, [role="button"], a, div, span');
+            const candidates = [];
+            for (const el of els) {
+                const text = (el.textContent || '').replace(/\\s+/g, '').trim();
+                const rect = el.getBoundingClientRect();
+                if (rect.height < 10 || rect.width < 30) continue;
+                if (text.length > 0 && text.length < 20) {
+                    candidates.push(text.substring(0, 15) + '|' + Math.round(rect.top) + '|h' + Math.round(rect.height) + 'w' + Math.round(rect.width));
+                }
+                // Match exact "发布" — exclude nav items, radio labels
+                if (text === '发布' && rect.height > 20 && rect.width > 50) {
+                    el.scrollIntoView({ block: 'center' });
+                    el.click();
+                    return 'clicked:' + el.tagName + '|' + candidates.join(';');
+                }
+            }
+            return 'not_found|' + candidates.join(';');
+        })()
+    """)
+    log.info(f"[KS] JS button search: {clicked}")
+
+    if not clicked or 'clicked' not in clicked:
+        # Method 2: AI Vision — take screenshot and ask AI to find the publish button
+        log.info("[KS] JS could not find 发布, trying AI vision")
+        ai_clicked = await find_and_click(session, '找到页面底部的红色/粉红色"发布"按钮（不是"取消"按钮，不是导航栏的"发布作品"）')
+        if ai_clicked:
+            clicked = 'clicked:ai_vision'
+            log.info("[KS] 发布 clicked via AI vision!")
+        else:
+            log.warning("[KS] AI vision also failed to find 发布 button")
+
+    if not clicked or 'clicked' not in clicked:
         # Debug screenshot
         try:
             ss = await take_screenshot(session)
@@ -317,7 +413,7 @@ async def publish(session, task) -> str:
             Path("data/debug/ks_no_publish_btn.png").write_bytes(ss)
         except Exception:
             pass
-        raise RuntimeError("Kuaishou: 发布 button not found")
+        raise RuntimeError(f"Kuaishou: 发布 button not found. Last result: {clicked}")
 
     await asyncio.sleep(2)
 

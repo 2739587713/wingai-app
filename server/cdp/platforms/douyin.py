@@ -286,7 +286,17 @@ async def _fill_content(session, content: str):
 async def _scroll_to_bottom(session):
     """Scroll the page to make the publish button visible."""
     await session.evaluate("""
-        window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'})
+        (() => {
+            // Scroll all possible containers (some platforms use inner scrollable divs)
+            const all = document.querySelectorAll('div, section, main');
+            for (const el of all) {
+                if (el.scrollHeight > el.clientHeight + 100 && el.clientHeight > 200) {
+                    el.scrollTop = el.scrollHeight;
+                }
+            }
+            window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'});
+            document.documentElement.scrollTop = document.documentElement.scrollHeight;
+        })()
     """)
     await asyncio.sleep(1.5)
     await session.evaluate("""
@@ -393,15 +403,16 @@ async def _click_publish(session):
     """Click the red 发布 button at the bottom."""
     await _scroll_to_bottom(session)
 
-    # Method 1: button[role] with exact text "发布"
+    # Method 1: Search all clickable elements for exact "发布" text
     clicked = await session.evaluate("""
         (() => {
-            const buttons = document.querySelectorAll('button, [role="button"]');
-            for (const btn of buttons) {
-                const text = btn.textContent.trim();
-                if (text === "发布") {
-                    btn.scrollIntoView({block: 'center'});
-                    btn.click();
+            const els = document.querySelectorAll('button, [role="button"], a, div, span');
+            for (const el of els) {
+                const text = (el.textContent || '').replace(/\\s+/g, '').trim();
+                const rect = el.getBoundingClientRect();
+                if (text === '发布' && rect.height > 20 && rect.width > 50) {
+                    el.scrollIntoView({block: 'center'});
+                    el.click();
                     return true;
                 }
             }
