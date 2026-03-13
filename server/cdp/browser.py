@@ -31,16 +31,55 @@ def _find_chrome():
 
 
 def _next_port():
+    """Find the next available CDP port, skipping ports already in use."""
     global _port_counter
+    for _ in range(100):
+        port = CDP_PORT_START + _port_counter
+        _port_counter = (_port_counter + 1) % 100
+        # Check if port is already in use
+        try:
+            r = requests.get(f"http://127.0.0.1:{port}/json/version", timeout=0.5)
+            if r.ok:
+                log.info(f"Port {port} already in use, skipping")
+                continue
+        except Exception:
+            pass
+        return port
+    # Fallback: just return the next one
     port = CDP_PORT_START + _port_counter
     _port_counter = (_port_counter + 1) % 100
     return port
+
+
+def _kill_port(port: int):
+    """Kill any process listening on the given port (Windows)."""
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if f"127.0.0.1:{port}" in line and "LISTENING" in line:
+                pid = line.strip().split()[-1]
+                log.warning(f"Port {port} occupied by PID {pid}, killing it")
+                subprocess.run(
+                    ["taskkill", "/PID", pid, "/F", "/T"],
+                    capture_output=True, timeout=10
+                )
+                time.sleep(1)
+                return True
+    except Exception as e:
+        log.warning(f"Failed to kill process on port {port}: {e}")
+    return False
 
 
 def launch_chrome(profile_dir: str | None = None, headless=False) -> tuple[subprocess.Popen, int]:
     """Launch Chrome with remote debugging. Returns (process, port)."""
     chrome = _find_chrome()
     port = _next_port()
+
+    # Kill any zombie browser on this port
+    _kill_port(port)
 
     if not profile_dir:
         profile_dir = str(PROFILES_DIR / f"default_{port}")
