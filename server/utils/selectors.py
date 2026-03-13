@@ -60,7 +60,10 @@ SELECTORS = {
     # ─── Kuaishou ───
     "ks_upload_input": [
         'input[type="file"]',
-        '.upload-area input[type="file"]',
+        'input[accept*="video"]',
+        'input[accept*="mp4"]',
+        'input[accept*="image"]',
+        '[class*="upload"] input[type="file"]',
     ],
     "ks_title_input": [
         'input[placeholder*="作品标题"]',
@@ -68,18 +71,15 @@ SELECTORS = {
         ".work-title input",
     ],
     "ks_content_editor": [
+        'textarea[placeholder*="描述"]',
+        'textarea[placeholder*="作品"]',
         '[contenteditable="true"]',
         ".ql-editor",
-        'textarea[placeholder*="描述"]',
     ],
-    "ks_publish_btn": [
-        "button.ant-btn-primary",
-        'button[class*="publish"]',
-        ".publish-btn button",
-    ],
+    "ks_publish_btn": [],  # Found by text "发布", handled in kuaishou.py
     "ks_login_check": [
-        ".avatar",
-        ".user-avatar",
-        'img[class*="avatar"]',
+        '[class*="avatar"]',
+        '[class*="user-name"]',
+        '[class*="快手用户"]',
     ],
 }

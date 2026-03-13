@@ -195,9 +195,23 @@ async def check_login_status(account_id: int, db: Session = Depends(get_db)):
             })()
         """)
 
+        # Check if the page shows "not logged in" indicators
+        # (e.g. Kuaishou profile page shows "立即登录" when not logged in)
+        shows_login_prompt = await session.evaluate("""
+            (() => {
+                const body = document.body.innerText || '';
+                const prompts = ['立即登录', '扫码登录', '密码登录', '验证码登录',
+                                  '请输入手机号', '登录/注册', '登录或注册'];
+                for (const t of prompts) { if (body.includes(t)) return true; }
+                return false;
+            })()
+        """)
+        if shows_login_prompt:
+            still_in_login_flow = True
+
         # Only confirm login if:
         # 1. On a known creator page with user elements, AND
-        # 2. NOT on a verification page
+        # 2. NOT on a verification/login page
         if not still_in_login_flow and (is_creator_page or has_user_element):
             # Double check — must have avatar or be on creator-micro page
             if is_creator_page or has_user_element:

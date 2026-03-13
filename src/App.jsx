@@ -84,6 +84,23 @@ const TMPLLIB=[
   {id:6,name:"薇娅直播切片",plat:"抖音",desc:"限时抢购+库存紧张+价格优势，直播电商核心",tags:["电商直播","紧迫感"],stat:"+28%",uses:"5.7k+次"},
 ];
 
+const VOICES=[
+  {id:"zh-CN-XiaoxiaoNeural",name:"晓晓",gender:"女",desc:"温柔亲切，种草推荐",for:["美妆","护肤","母婴"]},
+  {id:"zh-CN-XiaoyiNeural",name:"晓伊",gender:"女",desc:"活泼元气，年轻化",for:["零食","潮玩","数码"]},
+  {id:"zh-CN-XiaochenNeural",name:"晓辰",gender:"女",desc:"知性专业，测评讲解",for:["科技","教育","金融"]},
+  {id:"zh-CN-XiaohanNeural",name:"晓涵",gender:"女",desc:"甜美可爱，学生党",for:["美妆","服饰","文具"]},
+  {id:"zh-CN-XiaomoNeural",name:"晓墨",gender:"女",desc:"成熟优雅，高端品牌",for:["奢侈品","珠宝","红酒"]},
+  {id:"zh-CN-XiaoshuangNeural",name:"晓双",gender:"女",desc:"干练直爽，促单转化",for:["日用","家电","食品"]},
+  {id:"zh-CN-YunxiNeural",name:"云希",gender:"男",desc:"阳光磁性，全能型",for:["数码","运动","汽车"]},
+  {id:"zh-CN-YunjianNeural",name:"云健",gender:"男",desc:"沉稳权威，专业测评",for:["科技","金融","健康"]},
+  {id:"zh-CN-YunxiaNeural",name:"云夏",gender:"男",desc:"年轻活力，潮流达人",for:["潮玩","游戏","电竞"]},
+  {id:"zh-CN-YunyangNeural",name:"云扬",gender:"男",desc:"温暖治愈，生活方式",for:["家居","美食","旅行"]},
+];
+const SHOT_TAGS={hook:"黄金开头",close_up:"特写",medium:"中景",wide:"全景/远景",pov:"第一人称",aerial:"俯拍",low_angle:"仰拍",over_shoulder:"过肩"};
+const CAMERA_TAGS={static:"固定",zoom_in:"推进",zoom_out:"拉远",pan_left:"左移",pan_right:"右移",breathe:"呼吸",slow_up:"上移",tracking:"跟踪"};
+const LIGHT_TAGS={natural:"自然光",golden_hour:"黄金时段",high_key:"高调",low_key:"低调",rim_light:"轮廓光",neon:"霓虹",dramatic:"戏剧",soft:"柔光",spotlight:"聚光"};
+const MOOD_TAGS={epic:"史诗",warm:"温暖",energetic:"活力",calm:"平静",mysterious:"神秘",luxurious:"奢华",playful:"俏皮",professional:"专业",urgent:"紧迫"};
+
 // Sidebar navigation structure
 const NAV=[
   {group:"",items:[{k:"dash",icon:<I.Grid/>,label:"工作台"}]},
@@ -126,6 +143,8 @@ export default function App(){
   const [finalVideoUrl,setFinalVideoUrl]=useState(null);
   const [sbImgBusy,setSbImgBusy]=useState(false);
   const [vidGenBusy,setVidGenBusy]=useState(false);
+  const [sbVoice,setSbVoice]=useState("zh-CN-XiaoxiaoNeural");
+  const [sbElapsed,setSbElapsed]=useState(0);
   const [anaTab,setAnaTab]=useState(2);
   useEffect(()=>{if(cs==="storyboard"&&sbShots.length===0&&adopted?.table?.length>0){buildSbShots();}},[cs]);
   const [pi,setPi]=useState("");
@@ -540,56 +559,65 @@ export default function App(){
       if(i===0)tag="hook";
       else if(/特写|close.?up|微距/i.test(r.scene))tag="close_up";
       else if(/全景|wide|远景|大场景/i.test(r.scene))tag="wide";
-      return{text:r.copy,scene:r.scene,dur:r.dur,intent:r.intent,tag,imageUrl:null,audioUrl:null,videoUrl:null,imgPrompt:r.image_prompt||""};
+      else if(/第一人称|pov/i.test(r.scene))tag="pov";
+      else if(/俯拍|aerial|鸟瞰/i.test(r.scene))tag="aerial";
+      else if(/仰拍|low.?angle/i.test(r.scene))tag="low_angle";
+      let camera=tag==="hook"?"zoom_in":tag==="close_up"?"breathe":tag==="wide"?"pan_right":"static";
+      if(/推进|zoom.?in/i.test(r.scene))camera="zoom_in";
+      else if(/拉远|zoom.?out/i.test(r.scene))camera="zoom_out";
+      else if(/跟踪|tracking/i.test(r.scene))camera="tracking";
+      let lighting="natural",mood="professional";
+      if(/暖|温馨|warm/i.test(r.scene)){lighting="golden_hour";mood="warm";}
+      else if(/酷|冷|科技|neon/i.test(r.scene)){lighting="neon";mood="energetic";}
+      else if(/奢华|高端|luxur/i.test(r.scene)){lighting="dramatic";mood="luxurious";}
+      else if(/紧迫|限时|urgency/i.test(r.intent||"")){mood="urgent";}
+      return{text:r.copy,scene:r.scene,dur:r.dur,intent:r.intent,tag,camera,lighting,mood,
+        imageUrl:null,imageVersions:[],audioUrl:null,videoUrl:null,imgPrompt:r.image_prompt||"",
+        status:"pending",feedback:""};
     });
     setSbShots(shots);
+    // auto-select voice based on product category
+    const v=VOICES.find(v=>v.for.some(f=>cat.includes(f)));
+    if(v)setSbVoice(v.id);
+  };
+  const genOneImage=async(prompt)=>{
+    const r=await fetch("/api-proxy/v1/images/generations",{method:"POST",headers:API_HDRS,body:JSON.stringify({model:"gpt-image-1",prompt,n:1,size:"1024x1536",quality:"high"})});
+    if(!r.ok)throw new Error("图片API "+r.status);
+    const buf=await r.arrayBuffer();const text=new TextDecoder().decode(buf);const d=JSON.parse(text);
+    if(d.error)throw new Error(d.error.message);
+    const item=d.data?.[0];
+    if(item?.url)return item.url;
+    if(item?.b64_json)return "data:image/png;base64,"+item.b64_json;
+    throw new Error("未返回图片");
   };
   const generateSbImages=async()=>{
     if(sbShots.length===0)return;
     setSbImgBusy(true);setSbGenStatus("准备生成分镜图...");
+    const sem={count:0,max:3,queue:[]};
+    const withSem=async(fn)=>{while(sem.count>=sem.max)await new Promise(r=>sem.queue.push(r));sem.count++;try{return await fn();}finally{sem.count--;if(sem.queue.length>0)sem.queue.shift()();}};
+    let done=0;
     try{
-      for(let i=0;i<sbShots.length;i++){
-        setSbGenStatus(`正在生成第 ${i+1}/${sbShots.length} 张分镜图...`);
+      await Promise.all(sbShots.map((_,i)=>withSem(async()=>{
+        setSbShots(prev=>{const n=[...prev];n[i]={...n[i],status:"generating"};return n;});
         let prompt=sbShots[i].imgPrompt;
         if(!prompt){
-          const raw=await callLLM({model:"gemini-2.5-flash",prompt:`You are a visual prompt engineer. Convert this Chinese scene description into an English image generation prompt for a product video storyboard.
-
-Scene: ${sbShots[i].scene}
-Product: ${prod} (${cat})
-Shot type: ${sbShots[i].tag}
-
-Requirements:
-- English comma-separated phrases, Midjourney/DALL-E style
-- Include: subject, scene, lighting, color tone, composition, style keywords
-- Use generic product descriptions instead of brand names
-- 30-60 English words
-- No real human faces/names, use "elegant hands", "blurred silhouette" for people
-- Professional product photography style
-
-Output ONLY the prompt text, nothing else.`,temperature:0.7,maxTokens:200});
+          const raw=await callLLM({model:"gemini-2.5-flash",prompt:`You are a visual prompt engineer. Convert this Chinese scene description into an English image generation prompt for a product video storyboard.\n\nScene: ${sbShots[i].scene}\nProduct: ${prod} (${cat})\nShot type: ${sbShots[i].tag}\nCamera: ${sbShots[i].camera}\nLighting: ${sbShots[i].lighting}\nMood: ${sbShots[i].mood}\n\nRequirements:\n- English comma-separated phrases, Midjourney/DALL-E style\n- Include: subject, scene, lighting, color tone, composition, style keywords\n- Use generic product descriptions instead of brand names\n- 30-60 English words\n- No real human faces/names, use "elegant hands", "blurred silhouette"\n- Professional product photography\n\nOutput ONLY the prompt text.`,temperature:0.7,maxTokens:200});
           prompt=raw.trim();
         }
-        try{
-          const r=await fetch("/api-proxy/v1/images/generations",{method:"POST",headers:API_HDRS,body:JSON.stringify({model:"gpt-image-1",prompt,n:1,size:"1024x1536",quality:"high"})});
-          if(!r.ok)throw new Error("图片生成API错误: "+r.status);
-          const buf=await r.arrayBuffer();
-          const text=new TextDecoder().decode(buf);
-          const d=JSON.parse(text);
-          if(d.error)throw new Error(d.error.message);
-          const item=d.data?.[0];
-          let imgUrl=null;
-          if(item?.url)imgUrl=item.url;
-          else if(item?.b64_json)imgUrl="data:image/png;base64,"+item.b64_json;
-          if(imgUrl){
-            setSbShots(prev=>{const n=[...prev];n[i]={...n[i],imageUrl:imgUrl,imgPrompt:prompt};return n;});
-          }
-        }catch(e){
-          console.error(`[SB] 第${i+1}张图片生成失败:`,e.message);
-          setSbGenStatus(`第 ${i+1} 张生成失败: ${e.message}，继续下一张...`);
-          await new Promise(r=>setTimeout(r,1000));
+        // Generate 2 versions for user to pick
+        const versions=[];
+        for(let v=0;v<2;v++){
+          try{
+            const url=await genOneImage(prompt+(v>0?", alternative angle, different composition":""));
+            versions.push(url);
+          }catch(e){console.error(`[SB] shot ${i+1} v${v+1} failed:`,e.message);}
         }
-      }
-      setSbGenStatus("分镜图生成完成！");
+        const best=versions[0]||null;
+        setSbShots(prev=>{const n=[...prev];n[i]={...n[i],imageUrl:best,imageVersions:versions,imgPrompt:prompt,status:best?"generated":"pending"};return n;});
+        done++;
+        setSbGenStatus(`分镜图 ${done}/${sbShots.length} 完成`);
+      })));
+      setSbGenStatus(`分镜图全部生成完成！${sbShots.length}张`);
     }catch(e){
       console.error("[SB] generateSbImages error:",e);
       setSbGenStatus("生成出错: "+e.message);
@@ -597,9 +625,33 @@ Output ONLY the prompt text, nothing else.`,temperature:0.7,maxTokens:200});
       setSbImgBusy(false);
     }
   };
+  const approveFrame=(i)=>{setSbShots(prev=>{const n=[...prev];n[i]={...n[i],status:"approved"};return n;});};
+  const rejectFrame=(i,fb)=>{setSbShots(prev=>{const n=[...prev];n[i]={...n[i],status:"rejected",feedback:fb||""};return n;});};
+  const approveAll=()=>{setSbShots(prev=>prev.map(s=>s.status==="generated"||s.status==="rejected"?{...s,status:"approved",feedback:""}:s));};
+  const pickVersion=(i,vIdx)=>{setSbShots(prev=>{const n=[...prev];n[i]={...n[i],imageUrl:n[i].imageVersions[vIdx]||n[i].imageUrl};return n;});};
+  const regenFrame=async(i,feedback)=>{
+    setSbShots(prev=>{const n=[...prev];n[i]={...n[i],status:"regenerating"};return n;});
+    setSbImgBusy(true);setSbGenStatus(`重新生成第${i+1}张...`);
+    try{
+      let prompt=sbShots[i].imgPrompt||"product shot, professional photography";
+      if(feedback)prompt+=`. User feedback: ${feedback}`;
+      const url=await genOneImage(prompt);
+      setSbShots(prev=>{const n=[...prev];n[i]={...n[i],imageUrl:url,imageVersions:[...n[i].imageVersions,url],status:"generated",feedback:feedback||""};return n;});
+      setSbGenStatus("重新生成完成");
+    }catch(e){
+      setSbShots(prev=>{const n=[...prev];n[i]={...n[i],status:"generated"};return n;});
+      setSbGenStatus("重新生成失败: "+e.message);
+    }finally{setSbImgBusy(false);}
+  };
+  const sbCost=()=>{
+    const imgCount=sbShots.length;const imgCost=imgCount*0.12*2;// 2 versions each
+    const vidSec=sbShots.reduce((a,s)=>a+(parseInt(s.dur)||5),0);
+    const vidCost=sbShots.reduce((a,s)=>a+(SC_MODELS["veo3.1-fast"]?.cost||1.5),0);
+    return{imgCount,imgCost:imgCost.toFixed(2),vidSec,vidCost:vidCost.toFixed(2),ttsCost:"0.00",total:(imgCost+vidCost).toFixed(2)};
+  };
   const generateFullVideo=async()=>{
     if(sbShots.length===0)return;
-    setCs("generating");setVidGenBusy(true);setVgPct(0);setVgStep(0);setFinalVideoUrl(null);
+    setCs("generating");setVidGenBusy(true);setVgPct(0);setVgStep(0);setFinalVideoUrl(null);const _startT=Date.now();const _tmr=setInterval(()=>setSbElapsed(Math.round((Date.now()-_startT)/1000)),1000);
     const total=sbShots.length;
     try{
       // Step 1: TTS for each shot
@@ -609,7 +661,7 @@ Output ONLY the prompt text, nothing else.`,temperature:0.7,maxTokens:200});
         setVgPct(Math.round((i/total)*25));
         setSbGenStatus(`TTS配音 ${i+1}/${total}...`);
         try{
-          const r=await fetch("/edge-tts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:sbShots[i].text,voice:"zh-CN-XiaoxiaoNeural"})});
+          const r=await fetch("/edge-tts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:sbShots[i].text,voice:sbVoice})});
           if(!r.ok)throw new Error("TTS失败");
           const blob=await r.blob();
           audioBlobs.push(blob);
@@ -725,12 +777,12 @@ Output ONLY the prompt text, nothing else.`,temperature:0.7,maxTokens:200});
       setVgPct(100);setVgStep(4);
       setSbGenStatus("视频生成完成！");
       await new Promise(r=>setTimeout(r,1000));
-      setCs("preview");
+      clearInterval(_tmr);setSbElapsed(Math.round((Date.now()-_startT)/1000));setCs("preview");
     }catch(e){
       console.error("[Video] generateFullVideo error:",e);
       setSbGenStatus("视频生成失败: "+e.message);
     }finally{
-      setVidGenBusy(false);
+      setVidGenBusy(false);clearInterval(_tmr);
     }
   };
   // 压缩分析数据，避免截断丢失关键信息
@@ -1355,51 +1407,68 @@ ${styleList}
     try{
       // ═══ 第一步：千问联网搜索同品类爆款短视频，提炼爆款模式 ═══
       setAiGenStep("正在搜索全网同品类爆款短视频，分析流量密码...");
-      const trendRaw=await callLLM({model:"qwen3-max",system:"你是一位资深短视频数据分析师，擅长通过搜索引擎找到最新的爆款短视频案例并提炼规律。",prompt:`请搜索分析「${prod}」（品类：${cat||"通用"}）相关的抖音/快手短视频爆款内容。
+      const trendRaw=await callLLM({model:"qwen3-max",system:"你是一位在MCN机构工作8年的短视频操盘手，亲手打造过50+百万粉账号。你擅长通过搜索引擎找到最新爆款并像庖丁解牛一样拆解它们。你的分析不是学术论文，而是实操手册。",prompt:`搜索分析「${prod}」（品类：${cat||"通用"}）在抖音/快手/小红书的最新爆款短视频。
 
 爆款定义（符合任一即可）：
 - 点赞量 ≥ 10万
 - 低粉爆款：账号粉丝 < 5万 但单条点赞 > 1万
-- 近30天内的高互动内容（评论率 > 3%）
+- 近30天内的高互动视频（评论率 > 3%）
 
-请完成：
-1. 搜索并列出5-8个真实爆款视频案例（标题/概述、预估数据、爆款原因）
-2. 提炼这些爆款的共性模式：
-   - 常见的开头钩子类型（前3秒怎么抓人）
-   - 内容结构套路（如"痛点→方案→效果→逼单"）
-   - 画面节奏特征（快切/慢镜/对比/特写等）
-   - 高频使用的文案话术和情绪节奏
-   - 转化引导方式
-3. 总结出4-5种在该品类中验证过的「爆款脚本类型」，每种给出名称和核心特征
-4. 指出哪些类型特别适合AI生成制作（画面可由AI生图，旁白可由AI配音）
+请完成以下深度拆解：
 
-注意：如果搜索不到特定品类的案例，就搜索该品类所属大类（如护肤品→美妆护肤类）的爆款规律。
+一、搜索并列出5-8个真实爆款案例
+每个案例必须包含：标题/概述、预估数据（点赞/评论/转发）、账号粉丝量级、视频时长、爆款核心原因（不是泛泛而谈，要具体到"这条视频前3秒用了XX手法制造了XX情绪"）
 
-直接输出分析文本，不需要JSON格式。`,temperature:0.3,maxTokens:4096,enableSearch:true});
+二、逐帧级别的爆款共性拆解
+- 前3秒钩子库：至少列出6种已验证的开头类型，每种给出2个真实案例原文。分析为什么这些钩子有效（制造了什么认知冲突/情绪/好奇心缺口）
+- 内容结构拓扑：不只是"痛点→方案→效果"这种粗线条。要拆到每个节点的情绪值（0-10）、节奏（快/慢/停顿）、画面（特写/全景/对比/动态）——画出"情绪过山车"
+- 画面语言规律：运镜偏好（固定/手持/推拉）、色调趋势（该品类爆款偏暖还是偏冷？）、转场节奏（平均几秒切一次？高潮处怎么处理？）、特效使用频率
+- 台词节奏DNA：爆款台词的句子长度分布、语气词使用频率、停顿位置规律、重音模式、口头禅/catchphrase
+- 转化心理学：不同阶段用了什么心理触发器（稀缺性/社会认同/权威效应/损失厌恶/锚定效应）
+
+三、提炼4-5种该品类的「已验证爆款脚本类型」
+每种类型给出：名称、核心结构公式、典型情绪曲线、适用场景、代表案例、预估完播率区间
+
+四、AI纯画面制作适配方案
+我们的视频制作方式是：AI生成产品大片级画面 + TTS旁白配音，不使用真人出镜。类似高级种草号/好物号的风格。
+请分析：
+- 上述爆款中哪些视觉元素可以用AI图片生成器完美复刻？（产品特写、质地微距、场景氛围、概念对比图等）
+- 如何把需要真人的部分转化为AI可实现的画面？（如"主播试用"→"产品质地流动的微距特写"+"旁白描述使用感受"）
+- 该品类最适合的AI画面风格是什么？（杂志广告风/电影感/极简/赛博/日系等）
+
+注意：如果搜索不到特定品类的案例，搜索所属大类的爆款规律。宁可分析透3个真实案例，也不要编造虚假数据。
+
+直接输出分析文本，不需要JSON格式。`,temperature:0.3,maxTokens:6144,enableSearch:true});
 
       // ═══ 第二步：基于爆款分析设计4个差异化脚本大纲 ═══
       setAiGenStep("爆款分析完成，正在设计脚本结构...");
-      const sysOutline=`你是一位专注于${cat||"短视频"}品类的中国短视频脚本策划大师。你根据真实爆款数据来设计脚本，而非凭空想象。${ipCtx}`;
+      const sysOutline=`你是一位年收入千万的短视频编导，专注${cat||"短视频"}品类。你不写"方案"，你设计"内容炸弹"。你的每个脚本都像一颗精心设计的钩子——从第一帧开始就不让人划走。你根据真实爆款数据设计脚本，不凭空想象。${ipCtx}`;
 
-      const outlinePrompt=`以下是通过搜索得到的「${prod}」（${cat}）品类的爆款短视频分析报告：
+      const outlinePrompt=`以下是「${prod}」（${cat}）品类的爆款深度拆解报告：
 
 ${trendRaw}
 
 ---
 
-基于以上真实爆款分析，为「${prod}」设计4个完全不同的短视频脚本大纲。
-时长要求：${dur}
+基于以上拆解，为「${prod}」设计4个完全不同的短视频脚本大纲。
+时长：${dur}
 ${tmplInfo?`\n参考风格档案：\n${tmplInfo}`:""}
 
-要求：
-1. 4个方案必须从上述爆款分析中提炼出的「已验证脚本类型」中选取，直接借鉴爆款的结构套路和钩子类型
-2. 每个方案的情绪走法不同：有的开头就炸、有的慢热铺垫、有的悬念吊着、有的反转高潮
-3. 卖点策略各不相同：有的打价格、有的打效果、有的打情感、有的打信任
-4. name字段要有创意和吸引力，像爆款视频的标题一样，不要用"方案一/二/三"编号
-5. 画面设计要考虑AI视频制作的可行性（AI生图+AI配音+合成视频）
+══════ 设计铁律 ══════
+1. 4个方案必须从爆款报告中提炼的「已验证脚本类型」中选取，直接偷师爆款的结构套路和钩子
+2. 每个方案的"情绪过山车"必须不同：
+   - 方案A：前3秒就炸（高开→维持→二次高潮→收割）
+   - 方案B：悬念吊着（低开→设谜→揭秘→爆发）
+   - 方案C：反转打脸（常识→颠覆→证据→刷新认知）
+   - 方案D：情感共振（共鸣→痛点→救赎→种草）
+3. 卖点策略各不相同：价格锚定 / 效果对比 / 情感认同 / 权威背书 / 社交货币 / 焦虑制造
+4. name字段不是"方案一"！是像爆款标题一样让人忍不住点进去的一句话，例如："我花了3000块踩的坑，今天全告诉你""把XX扔了吧，这个才XX块"
+5. hook字段要写出完整的前3秒台词+画面设计，不是概述
+6. structure不是泛泛的步骤名，而是每一步的情绪值(0-10)+核心动作，如："好奇心炸弹(9)→产品特写揭秘(7)→效果对比冲击(10)→价格锚定(8)→紧迫逼单(9)"
+7. ⚠️ 画面全部由AI图片生成器制作+TTS旁白配音，绝对不能有真人出镜/口播/表情/手部操作！只能用：产品英雄镜头、质地微距、成分可视化、场景氛围空镜、before/after概念对比、flat lay平铺、局部虚化暗示。参考"种草号""好物推荐号"的纯画面+旁白风格
 
 JSON输出：
-{"outlines":[{"name":"像爆款标题一样有吸引力的方案名","type":"脚本类型（从爆款分析中提炼）","emotion":"情绪走法","shots":6,"strategy":"核心卖点策略","hook":"前3秒钩子设计（借鉴爆款）","diff":"与其他方案的本质区别","structure":["步骤1","步骤2","步骤3","步骤4","步骤5"]}]}`;
+{"outlines":[{"name":"像爆款标题一样有冲击力的方案名（20字内）","type":"脚本类型（从爆款分析提炼）","emotion":"情绪走法：用曲线描述如 高开(9)→回落(5)→二次冲击(10)→收割(8)","shots":6,"strategy":"核心心理触发器+卖点策略","hook":"前3秒完整设计：画面(XX镜头+XX画面)+台词(完整台词文字)","diff":"与其他方案的本质区别（一句话）","structure":["情绪值+步骤动作","情绪值+步骤动作"]}]}`;
 
       const outlineData=await generateJSON({model:"gemini-2.5-flash",system:sysOutline,prompt:outlinePrompt,temperature:0.5,maxTokens:4096});
       const outlines=outlineData.outlines||[];
@@ -1408,44 +1477,82 @@ JSON输出：
       // ═══ 第三步：并行展开每个大纲为完整分镜脚本 ═══
       setAiGenStep(`结构设计完成，正在并行创作${outlines.length}个脚本方案...`);
 
-      const sysScript=`你是一位顶级短视频脚本创作者。你基于真实爆款数据创作脚本，台词100%像真人说话，绝不像念稿。${tmplInfo?`\n你正在模仿「${creatorName}」的风格：\n${tmplInfo}`:""}${ipCtx}`;
+      const sysScript=`你是抖音头部MCN的首席编导，操盘过100+条百万播放视频。你写的脚本有三个特点：1)台词像闺蜜/兄弟在聊天，绝不像念稿；2)每个画面都是精心设计的视觉钩子；3)情绪节奏像过山车，让人从头到尾不想划走。你写的不是"脚本"，是一部微型电影的导演手册。${tmplInfo?`\n你正在模仿「${creatorName}」的风格和说话习惯：\n${tmplInfo}`:""}${ipCtx}`;
 
-      const expandOne=(outline)=>`将以下脚本大纲展开为完整分镜脚本。
+      const expandOne=(outline)=>`将以下脚本大纲展开为一条能在抖音拿到百万播放的完整分镜脚本。你不是在写说明书，你是在导一部30秒短片。
 
 产品：${prod}（${cat}）| 时长：${dur}
 
-【爆款分析背景】
-${trendRaw.slice(0,1500)}
+【爆款分析背景——你的弹药库】
+${trendRaw.slice(0,2000)}
 
 【方案大纲】
-名称：${outline.name}｜类型：${outline.type}｜情绪：${outline.emotion}
+名称：${outline.name}｜类型：${outline.type}｜情绪走法：${outline.emotion}
 镜头数：${outline.shots}个｜卖点策略：${outline.strategy}
 前3秒钩子：${outline.hook||""}
 步骤：${outline.structure.join(" → ")}
 
 ${riskRules}
 
-【台词铁律】
-① 100%口语化，禁止书面语（"何以至此""焕然一新"全部禁止）
-② 每句≤15字，多用语气词（啊、哦、哇、真的、对吧）
-③ 上下句自然衔接，像一个人连续说话
-④ 开场句必须像真人开口说话，参考爆款钩子："等等先别划走""哇我用了三个月才敢说""你敢信？"
-⑤ 时长与台词字数严格匹配（4~5字/秒）：3秒≈12-15字、5秒≈20-25字、8秒≈32-40字、10秒≈40-50字
-⑥ 每个镜头标注情绪变化${tmplInfo?`\n⑦ 植入产品名+至少2个「${creatorName}」标志性用词`:""}
+══════ 旁白台词创作军规（TTS配音，不是真人口播）══════
+⚠️ 这些台词将由AI语音合成朗读，配合产品大片画面播放，类似高级种草号/好物推荐号的风格。
 
-【画面描述规则】
-scene字段：用中文描述画面内容，用"主播""主人公"等通用称呼。写清楚景别（特写/中景/全景）、人物动作/表情、产品呈现方式。这个描述面向用户阅读，要自然易懂。
-image_prompt字段：英文AI生图提示词（这个字段不展示给用户，仅用于后续AI生图）：
-- Midjourney/DALL-E风格，逗号分隔短语，30-60词
-- 包含：主体、场景、光线、色调、构图、风格
-- 产品用通用描述（如"a premium skincare bottle"）
-- 人物用局部/虚化表达（"elegant hands holding product""soft silhouette""person from behind"）
-- 风格词：professional product photography, cinematic lighting, soft bokeh, macro shot, editorial style, warm/cool tones
+① 100%口语化！禁止一切书面腔（"焕然一新""何以至此""与众不同""品质卓越"全部枪毙）
+② 每句话≤15字，短句连发像机关枪。多用：啊、哦、哇、真的假的、你猜怎么着、我跟你说、对吧、懂了吗
+③ 台词之间要有"呼吸感"——不是匀速念稿，而是：快快快→停顿→重点慢放→再加速。用"..."标注停顿，用"【重】"标注需要加重语气的词
+④ 开场句是生死线！必须在0.5秒内制造认知冲突。参考这些已验证钩子：
+   "别买！除非你听我说完这句话" / "我花了3000块试了20款，只有这一个让我惊了" / "你敢信这玩意才XX块？" / "等等先别划走，我要说一个得罪同行的大实话" / "用了三个月，我终于敢出来说了" / "姐妹们被我骂了三天，因为我之前没推这个"
+⑤ 时长与字数严格匹配（4~5字/秒）：3秒≈12-15字、5秒≈20-25字、8秒≈32-40字、10秒≈40-50字
+⑥ 台词要有"钩子链"——每句话结尾勾着下一句，让观众不想划走：设置悬念("但接下来才是重点")、反转("结果你猜怎么着")、互动("你说气不气人")
+⑦ 逼单话术不要硬邦邦。不说"赶紧下单"，要说"反正我已经囤了三瓶了""链接我放这儿了，不买也先收藏，早晚用得上"
+⑧ 台词与画面的配合：旁白描述的内容要与当前画面呼应但不重复——画面是产品特写时，旁白说功效/体验；画面是氛围图时，旁白制造情绪/讲故事；画面是对比图时，旁白给数据/证据${tmplInfo?`\n⑨ 植入产品名+至少2个「${creatorName}」标志性用词和说话习惯`:""}
 
-badges说明：每个方案给2-3个描述性标签，t是标签文字（如"高转化""强信任""情感共鸣""实验对比""痛点驱动""价格锚定""种草力强"等），c是类型（conv=转化类/exp=曝光类/auth=权威类）。
+══════ 画面描述规则（scene字段）— AI生图专用 ══════
+⚠️ 核心原则：所有画面必须是AI图片生成器能高质量完成的！这是旁白配音视频，不是真人口播！
 
-JSON输出：
-{"name":"${outline.name}","dur":"${dur}","shots":${outline.shots},"sell":3,"desc":"一句话概括创意亮点（30字内，像视频简介）","badges":[{"t":"高转化","c":"conv"},{"t":"痛点驱动","c":"exp"}],"logic":${JSON.stringify(outline.structure)},"table":[{"shot":1,"dur":"3秒","scene":"中文画面描述（用主播/主人公称呼）","copy":"口播台词","image_prompt":"English AI image prompt for this shot","risk":false,"intent":"情绪：低→中 | 目的：xxx"}]}`;
+【绝对禁止的画面类型】——AI做不好，写了也白写：
+✗ 真人正脸/表情/口型（"主播微笑展示"→ 禁止！AI人脸恐怖谷）
+✗ 精细手部操作（"手指涂抹产品"→ AI手指会畸形）
+✗ 多人互动场景（"闺蜜对话"→ AI人物关系混乱）
+✗ 文字/数字/LOGO（"屏幕显示价格"→ AI文字会乱码）
+✗ 复杂肢体动作（"拆箱""涂抹""按压泵头"→ 动作会变形）
+
+【AI擅长的高质量画面类型】——只能从这些类型中选：
+① 产品英雄镜头：产品放在精心布置的场景中，像广告大片（大理石台面/鲜花环绕/光影交错/水滴质感）
+② 质地微距：乳液质地、粉末散落、液体流动、气泡、结晶——极致放大到抽象美感
+③ 成分可视化：原料食材/植物/矿物的艺术化呈现（薰衣草田、蜂蜜流淌、冰川融水）
+④ 场景氛围图：传递情绪的空镜——晨光浴室、雨后窗台、咖啡馆角落、城市霓虹
+⑤ 对比概念图：before/after用抽象表达（枯萎vs绽放的花、混浊vs清澈的水、灰暗vs明亮的光线）
+⑥ 平铺排列：产品+配件+装饰物的knolling flat lay俯拍，像杂志编辑图
+⑦ 局部暗示：只拍肩颈/后背/发丝/手腕（避开正脸和手指），虚化处理，暗示使用感受
+⑧ 数据图形化：用视觉隐喻代替数字——堆叠的硬币→省钱、上升的阶梯→效果、满溢的杯子→超值
+
+每个scene必须写明：
+1.【类型】上述8类中选一个
+2.【景别+运镜】大特写/特写/中景/全景/俯拍 + 固定/缓慢推进/缓慢拉远（AI视频只适合缓慢运镜）
+3.【具体画面】不要"产品展示"→要"磨砂玻璃精华瓶斜放在湿润的黑色石板上，瓶身凝结细密水珠，一束侧逆光穿过瓶身折射出琥珀色光斑，背景是失焦的绿色蕨类植物"
+4.【色调】冷白调/暖橘/电影青橙/高级灰/莫兰迪/赛博霓虹
+5.【转场】叠化/淡入淡出/闪白/匹配剪辑（前后画面构图相似的无缝切换）
+
+══════ AI生图提示词（image_prompt字段）══════
+纯英文，给gpt-image-1/Midjourney的专业指令，60-100词：
+- 绝对不要出现：face, smile, expression, fingers, hand holding, person talking, mouth, eyes, portrait
+- 产品描述要具体："a frosted glass serum bottle with gold cap, 45-degree angle, dewy condensation droplets on surface, sitting on wet black slate"
+- 人物只能用极度虚化/局部：blurred silhouette in background, out-of-focus shoulder, soft-focus hair from behind, anonymous feminine neck and collarbone
+- 必须包含：lighting setup（rim light/key light/golden hour/neon glow具体灯位）, lens specs（macro 100mm f/2.8 / 85mm f/1.4 / 35mm wide）, color palette, composition（rule of thirds/centered/negative space）
+- 风格锚定词：commercial product photography for Vogue, cinematic still life, Apple-style minimalism, Korean beauty editorial, Japanese wabi-sabi aesthetic, luxury brand campaign
+- 连续镜头间要有视觉节奏变化：特写→全景→微距→氛围，冷调→暖调交替
+
+══════ 情绪&意图设计（intent字段）══════
+不要写"情绪：低→中"这种废话。要写：
+- 精确的情绪峰谷值（0-10分）：如"好奇8→震惊10 | 认知炸弹：打破用户对价格的固有认知"
+- 这个镜头在整个视频中的战术目的：制造好奇心/建立信任/触发焦虑/给出解决方案/social proof/价格锚定/紧迫感/行动号召
+- 完播率策略：这个镜头怎么让人"不划走"
+
+badges说明：每个方案给2-3个描述性标签，t是标签文字（如"高转化""强信任""情感共鸣""实验对比""痛点驱动""价格锚定""种草力强""完播率杀手""评论区炸弹"等），c是类型（conv=转化类/exp=曝光类/auth=权威类）。
+
+JSON输出（严格按此格式，table数组每个元素都必须包含所有字段）：
+{"name":"${outline.name}","dur":"${dur}","shots":${outline.shots},"sell":3,"desc":"一句话概括创意亮点（30字内，像爆款视频简介，要有冲击力）","badges":[{"t":"标签","c":"类型"}],"logic":${JSON.stringify(outline.structure)},"table":[{"shot":1,"dur":"3秒","scene":"【类型：产品英雄镜头】【大特写·缓慢推进】磨砂玻璃精华瓶斜放在湿润黑色石板上，瓶身凝结细密水珠，侧逆光穿过瓶身折射琥珀色光斑，背景失焦蕨类植物【暖橘调】【转场：从黑屏淡入】","copy":"旁白台词（用...标停顿，【重】标重音）","image_prompt":"frosted glass serum bottle with gold cap lying at 45-degree angle on wet black slate surface, tiny condensation droplets catching light, single rim light from upper left creating amber lens flare through bottle, blurred green fern leaves in background, macro 100mm f/2.8, warm amber and deep green color palette, commercial product photography, Vogue beauty editorial style, rule of thirds composition","risk":false,"intent":"好奇9→期待10 | 战术：视觉冲击建立品质感，黄金3秒留住观众 | 完播策略：高级画面+悬念旁白制造信息缺口"}]}`;
 
       const results=await Promise.all(outlines.map(o=>
         generateJSON({model:"gemini-2.5-pro",system:sysScript,prompt:expandOne(o),temperature:0.7,maxTokens:6144}).catch(e=>{
@@ -2202,7 +2309,8 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
 .sch-cal table{width:100%;border-collapse:collapse;table-layout:fixed}
 .sch-cal th{padding:10px 4px;font-size:12px;font-weight:600;color:var(--t3);text-align:center;border-bottom:1px solid var(--bl);background:var(--s2)}
 .sch-cal th:first-child{width:100px}
-.sch-cal td{border:1px solid var(--bl);vertical-align:top;padding:4px 6px;height:80px;font-size:12px;cursor:pointer;transition:background .15s;background:var(--s)}
+.sch-cal td{border:1px solid var(--bl);vertical-align:top;padding:4px 6px;height:90px;font-size:12px;cursor:pointer;transition:background .15s;background:var(--s);overflow-y:auto}
+.sch-cal td::-webkit-scrollbar{width:2px}.sch-cal td::-webkit-scrollbar-thumb{background:var(--b);border-radius:1px}
 .sch-cal td:first-child{background:var(--s2);text-align:center;vertical-align:middle;cursor:default;border:1px solid var(--bl)}
 .sch-cal td:hover{background:var(--s2)}
 .sch-cal td .day-n{font-weight:600;color:var(--t1);margin-bottom:2px}.sch-cal td.dim .day-n{color:var(--t3)}
@@ -2451,7 +2559,11 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
           {g.items.map(it=><div key={it.k}>
             <div className={`sb-i ${isActive(it.k)?"on":""} ${it.accent?"accent":""}`}
               onClick={()=>{
-                if(it.action==="modal")openModal();
+                if(it.action==="modal"){
+                  // If already in a creation flow, just go back to it instead of opening new modal
+                  if(pg==="create"||pg==="create-deep") setPg(pg);
+                  else openModal();
+                }
                 else setPg(it.k);
               }}>
               {it.icon} {it.label}
@@ -3113,10 +3225,9 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                     const dayTasks=d.cur?schGetTasksForDay(d.d):[];
                     return <td key={di} className={`${d.cur?"":"dim"} ${d.today?"today":""}`} onClick={()=>{setSchDate(`${schYear}-${String(schMonth+1).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`);setSchModal(true);}}>
                       <div className="day-n">{d.d}{d.today&&<span className="sch-today-badge">今天</span>}</div>
-                      {dayTasks.slice(0,3).map(t=><div key={t.id} className="sch-cal-task" style={{background:t.color||"var(--p)",color:"#fff",fontSize:9,padding:"1px 4px",borderRadius:3,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer"}} onClick={e=>{e.stopPropagation();setSchLogModal(t.id);}} title={`${t.title} [${t.status}]`}>
+                      {dayTasks.map(t=><div key={t.id} className="sch-cal-task" style={{background:t.status==="failed"?"#EF4444":t.color||"var(--p)",color:"#fff",fontSize:9,padding:"1px 4px",borderRadius:3,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer"}} onClick={e=>{e.stopPropagation();setSchLogModal(t.id);}} title={`${t.title} [${t.status}]`}>
                         {t.status==="success"?"✓ ":t.status==="failed"?"✗ ":t.status==="running"?"⟳ ":"◷ "}{t.title||t.platform}
                       </div>)}
-                      {dayTasks.length>3&&<div style={{fontSize:8,color:"var(--t3)",marginTop:1}}>+{dayTasks.length-3}个</div>}
                     </td>;
                   })}
                 </tr>;
@@ -3189,6 +3300,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                   <span>{t.platform}</span>
                   {t.status==="pending"&&<span style={{color:"var(--p)",cursor:"pointer"}} onClick={()=>schPublishNow(t.id)}>立即发布</span>}
                   {t.status==="failed"&&<span style={{color:"var(--r)",cursor:"pointer"}} onClick={()=>schPublishNow(t.id)}>重试</span>}
+                  {t.status==="running"&&(Date.now()-new Date(t.updated_at||t.scheduled_at).getTime()>300000)&&<span style={{color:"#F59E0B",cursor:"pointer"}} onClick={()=>schPublishNow(t.id)}>超时重试</span>}
                   <span style={{color:"var(--t3)",cursor:"pointer"}} onClick={()=>schDeleteTask(t.id)}>删除</span>
                 </div>
               </div>)}
@@ -3460,6 +3572,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                 <div className="sch-td-actions">
                   {t.status==="pending"&&<button className="sch-nm-btn pri" style={{fontSize:12,padding:"8px 20px"}} onClick={()=>{schPublishNow(t.id);setSchLogModal(null);}}>立即发布</button>}
                   {t.status==="failed"&&<button className="sch-nm-btn pri" style={{fontSize:12,padding:"8px 20px"}} onClick={()=>{schPublishNow(t.id);setSchLogModal(null);}}>重新发布</button>}
+                  {t.status==="running"&&<button className="sch-nm-btn pri" style={{fontSize:12,padding:"8px 20px",background:"#F59E0B"}} onClick={()=>{schPublishNow(t.id);setSchLogModal(null);}}>强制重试</button>}
                   <button className="sch-nm-btn sec" style={{fontSize:12,padding:"8px 20px",color:"var(--r)"}} onClick={()=>{schDeleteTask(t.id);setSchLogModal(null);}}>删除任务</button>
                 </div>
               </>;})()}
@@ -3884,7 +3997,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
         {/* CREATE PAGE */}
         {pg==="create"&&cs!=="storyboard"&&<div className="sw">
           <div className="sl">
-            <div className="sl-hd"><div className="sl-bk" onClick={()=>setPg("dash")}><I.ArrowL/> 返回工作台</div><div style={{fontSize:15,fontWeight:700}}>脚本创作</div></div>
+            <div className="sl-hd"><div className="sl-bk" onClick={()=>setPg("dash")}><I.ArrowL/> 返回工作台</div><div style={{fontSize:15,fontWeight:700}}>脚本创作</div><button style={{marginLeft:"auto",padding:"4px 10px",borderRadius:6,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontFamily:"inherit"}} onClick={openModal}><I.Plus/> 新创作</button></div>
             <div className="sl-sec"><div className="sl-lb">产品</div><div className="sl-vl">{prod}</div></div>
             <div className="sl-sec"><div className="sl-lb">品类</div><div className="sl-tag">{cat}</div></div>
             <div className="sl-sec"><div className="sl-lb">时长</div><div className="sl-vl">{dur}</div></div>
@@ -3987,43 +4100,106 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
               <span key={i} style={{display:"inline-flex",alignItems:"center",gap:4}}>{i>0&&<span className="sb-sep">›</span>}<span className={`sb-step ${st.s}`}><span className="sb-step-dot">{st.s==="done"?<I.Check/>:""}</span>{st.l}</span></span>
             )}
           </div>
-          <div className="sb-hd">
-            <div style={{display:"flex",alignItems:"center",gap:12}}><button style={{padding:"5px 12px",borderRadius:8,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:12,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:4,fontFamily:"inherit"}} onClick={()=>setCs("shots")}><I.ArrowL/> 返回</button><div className="sb-hd-t">分镜预览</div>{sbGenStatus&&<span style={{fontSize:11,color:"var(--p)",marginLeft:12}}>{sbGenStatus}</span>}</div>
-            <div className="sb-hd-acts">
-              <button className="sb-hd-btn green" disabled={sbImgBusy} onClick={generateSbImages}>{sbImgBusy?<><span className="spin-sm"/>生成中...</>:<><I.Sparkle/> 生成分镜图</>}</button>
-              <button className="sb-hd-btn ghost" disabled={vidGenBusy} onClick={generateFullVideo}><I.Camera/> 生成视频</button>
-            </div>
-          </div>
-          <div className="sb-grid">
-            {(sbShots.length>0?sbShots:adopted?.table||[]).map((c,i)=>(
-              <div key={i} className="sb-card" onClick={()=>setSbEdit(i)}>
-                <div className="sb-card-img">{c.imageUrl?<img src={c.imageUrl} alt={`shot ${i+1}`} style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:"inherit"}}/>:c.imgPrompt||c.image_prompt?<span style={{fontSize:9,color:"var(--t3)",padding:8,lineHeight:1.4,textAlign:"center"}}>{(c.imgPrompt||c.image_prompt||"").slice(0,80)}...</span>:"点击生成按钮"}</div>
-                <div className="sb-card-body">
-                  <div className="sb-card-meta">
-                    <span className={`sb-card-tag ${c.tag||(i===0?"hook":"medium")}`}>{c.tag||(i===0?"hook":`shot_${i+1}`)}</span>
-                    <span className="sb-card-dur">{c.dur}</span>
-                    <span className="sb-card-num">#{i+1}</span>
-                  </div>
-                  <div className="sb-card-text">{c.text||c.copy}</div>
-                  {c.audioUrl&&<div style={{marginTop:4}}><audio src={c.audioUrl} controls style={{width:"100%",height:24}}/></div>}
-                  {c.videoUrl&&<div style={{marginTop:4,fontSize:10,color:"var(--p)"}}>✓ 视频已生成</div>}
-                  <div className="sb-card-acts">
-                    <span className="sb-card-act" onClick={e=>{e.stopPropagation();setSbEdit(i);}}>编辑</span>
-                    <span className="sb-card-act" onClick={e=>{e.stopPropagation();if(!sbImgBusy){setSbImgBusy(true);setSbGenStatus(`重新生成第${i+1}张...`);(async()=>{try{const prompt=sbShots[i]?.imgPrompt||"product shot, professional photography";const r=await fetch("/api-proxy/v1/images/generations",{method:"POST",headers:API_HDRS,body:JSON.stringify({model:"gpt-image-1",prompt,n:1,size:"1024x1536",quality:"high"})});if(!r.ok)throw new Error("API错误");const buf=await r.arrayBuffer();const text=new TextDecoder().decode(buf);const d=JSON.parse(text);const item=d.data?.[0];let imgUrl=item?.url||(item?.b64_json?"data:image/png;base64,"+item.b64_json:null);if(imgUrl)setSbShots(prev=>{const n=[...prev];n[i]={...n[i],imageUrl:imgUrl};return n;});setSbGenStatus("重新生成完成");}catch(e){setSbGenStatus("重新生成失败: "+e.message);}finally{setSbImgBusy(false);}})();}}}>重新生成</span>
-                  </div>
+          <div style={{display:"flex",gap:16,padding:"0 24px",flex:1,overflow:"hidden"}}>
+            {/* Left: frame grid */}
+            <div style={{flex:1,overflow:"auto",paddingRight:8}}>
+              <div className="sb-hd">
+                <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                  <button style={{padding:"5px 12px",borderRadius:8,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:12,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:4,fontFamily:"inherit"}} onClick={()=>setCs("shots")}><I.ArrowL/> 返回</button>
+                  <div className="sb-hd-t">分镜预览</div>
+                  {sbGenStatus&&<span style={{fontSize:11,color:"var(--p)"}}>{sbGenStatus}</span>}
+                </div>
+                <div className="sb-hd-acts">
+                  <button className="sb-hd-btn green" disabled={sbImgBusy} onClick={generateSbImages}>{sbImgBusy?<><span className="spin-sm"/>生成中...</>:<><I.Sparkle/> 生成分镜图</>}</button>
+                  <button className="sb-hd-btn" style={{background:"#059669",color:"#fff"}} onClick={approveAll} disabled={sbShots.every(s=>s.status!=="generated"&&s.status!=="rejected")}><I.Check/> 全部通过</button>
+                  <button className="sb-hd-btn ghost" disabled={vidGenBusy||sbShots.some(s=>s.status==="pending")} onClick={generateFullVideo}><I.Camera/> 生成视频</button>
+                  <button className="sb-hd-btn" style={{background:"var(--s)",color:"var(--t2)",border:"1px solid var(--bl)",marginLeft:8}} onClick={openModal}><I.Plus/> 新创作</button>
                 </div>
               </div>
-            ))}
+              <div className="sb-grid">
+                {(sbShots.length>0?sbShots:adopted?.table||[]).map((c,i)=>{
+                  const st=c.status||"pending";
+                  const stColor=st==="approved"?"#059669":st==="rejected"?"#DC2626":st==="generating"||st==="regenerating"?"#7C3AED":st==="generated"?"#2563EB":"#9CA3AF";
+                  const stLabel=st==="approved"?"已通过":st==="rejected"?"已驳回":st==="generating"?"生成中":st==="regenerating"?"重新生成中":st==="generated"?"待审核":"未生成";
+                  return <div key={i} className="sb-card" style={{borderColor:st==="approved"?"#059669":st==="rejected"?"#DC2626":"var(--bl)"}}>
+                    <div className="sb-card-img" onClick={()=>setSbEdit(i)} style={{cursor:"pointer",position:"relative"}}>
+                      {c.imageUrl?<img src={c.imageUrl} alt={`shot ${i+1}`} style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:"inherit"}}/>:(st==="generating"||st==="regenerating")?<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}><span className="spin-sm" style={{borderTopColor:"var(--p)",borderColor:"var(--bl)",width:24,height:24}}/>生成中...</div>:c.imgPrompt||c.image_prompt?<span style={{fontSize:9,color:"var(--t3)",padding:8,lineHeight:1.4,textAlign:"center"}}>{(c.imgPrompt||c.image_prompt||"").slice(0,80)}...</span>:"点击生成"}
+                      <span style={{position:"absolute",top:6,right:6,fontSize:9,padding:"2px 6px",borderRadius:4,background:stColor,color:"#fff",fontWeight:600}}>{stLabel}</span>
+                      {c.imageVersions?.length>1&&<div style={{position:"absolute",bottom:4,left:0,right:0,display:"flex",justifyContent:"center",gap:4}}>
+                        {c.imageVersions.map((v,vi)=><span key={vi} onClick={e=>{e.stopPropagation();pickVersion(i,vi);}} style={{width:8,height:8,borderRadius:"50%",background:c.imageUrl===v?"var(--p)":"rgba(255,255,255,0.6)",border:"1px solid rgba(0,0,0,0.3)",cursor:"pointer"}}/>)}
+                      </div>}
+                    </div>
+                    <div className="sb-card-body">
+                      <div className="sb-card-meta">
+                        <span className={`sb-card-tag ${c.tag||(i===0?"hook":"medium")}`}>{SHOT_TAGS[c.tag]||c.tag||"中景"}</span>
+                        <span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:"#EEF2FF",color:"#4338CA"}}>{CAMERA_TAGS[c.camera]||"固定"}</span>
+                        <span className="sb-card-dur">{c.dur}</span>
+                        <span className="sb-card-num">#{i+1}</span>
+                      </div>
+                      <div className="sb-card-text" style={{fontSize:11}}>{c.text||c.copy}</div>
+                      {c.audioUrl&&<div style={{marginTop:4}}><audio src={c.audioUrl} controls style={{width:"100%",height:24}}/></div>}
+                      {c.videoUrl&&<div style={{marginTop:4,fontSize:10,color:"var(--p)"}}>✓ 视频片段已生成</div>}
+                      {c.feedback&&<div style={{marginTop:4,fontSize:10,color:"#DC2626",fontStyle:"italic"}}>反馈: {c.feedback}</div>}
+                      <div className="sb-card-acts">
+                        {(st==="generated"||st==="rejected")&&<><span className="sb-card-act" style={{color:"#059669"}} onClick={e=>{e.stopPropagation();approveFrame(i);}}>✓通过</span><span className="sb-card-act" style={{color:"#DC2626"}} onClick={e=>{e.stopPropagation();const fb=window.prompt("驳回反馈（可选）：","");if(fb!==null)rejectFrame(i,fb);}}>✗驳回</span></>}
+                        <span className="sb-card-act" onClick={e=>{e.stopPropagation();setSbEdit(i);}}>编辑</span>
+                        <span className="sb-card-act" onClick={e=>{e.stopPropagation();const fb=st==="rejected"?c.feedback:"";regenFrame(i,fb);}}>重新生成</span>
+                      </div>
+                    </div>
+                  </div>;})}
+              </div>
+            </div>
+            {/* Right: voice selector + cost panel */}
+            <div style={{width:260,flexShrink:0,overflow:"auto",display:"flex",flexDirection:"column",gap:12}}>
+              {/* Voice selector */}
+              <div className="fn" style={{padding:12}}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>配音语音</div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {VOICES.map(v=><label key={v.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",borderRadius:8,border:sbVoice===v.id?"2px solid var(--p)":"1px solid var(--bl)",background:sbVoice===v.id?"#F5F3FF":"var(--s)",cursor:"pointer",fontSize:11}} onClick={()=>setSbVoice(v.id)}>
+                    <input type="radio" name="sbv" checked={sbVoice===v.id} onChange={()=>setSbVoice(v.id)} style={{accentColor:"var(--p)"}}/>
+                    <div><div style={{fontWeight:600}}>{v.name} <span style={{color:"var(--t3)",fontWeight:400}}>{v.gender}</span></div><div style={{fontSize:10,color:"var(--t3)"}}>{v.desc}</div></div>
+                  </label>)}
+                </div>
+              </div>
+              {/* Cost panel */}
+              <div className="fn" style={{padding:12}}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>费用预估</div>
+                {(()=>{const c=sbCost();return <div style={{fontSize:11,display:"flex",flexDirection:"column",gap:4}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span>分镜图 ×{c.imgCount}×2版</span><span>¥{c.imgCost}</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span>视频 {c.vidSec}秒</span><span>¥{c.vidCost}</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span>TTS配音</span><span style={{color:"#059669"}}>免费</span></div>
+                  <div style={{borderTop:"1px solid var(--bl)",marginTop:4,paddingTop:4,display:"flex",justifyContent:"space-between",fontWeight:700,color:"var(--p)"}}><span>合计</span><span>¥{c.total}</span></div>
+                </div>;})()}
+              </div>
+              {/* Status summary */}
+              <div className="fn" style={{padding:12}}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>审核进度</div>
+                <div style={{fontSize:11,display:"flex",flexDirection:"column",gap:3}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span>已通过</span><span style={{color:"#059669",fontWeight:600}}>{sbShots.filter(s=>s.status==="approved").length}/{sbShots.length}</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span>待审核</span><span style={{color:"#2563EB"}}>{sbShots.filter(s=>s.status==="generated").length}</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span>已驳回</span><span style={{color:"#DC2626"}}>{sbShots.filter(s=>s.status==="rejected").length}</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span>未生成</span><span style={{color:"var(--t3)"}}>{sbShots.filter(s=>s.status==="pending").length}</span></div>
+                </div>
+              </div>
+            </div>
           </div>
-          {sbEdit!==null&&(()=>{const sr=sbShots[sbEdit]||(adopted?.table?.[sbEdit]);const _ed={copy:sr?.text||sr?.copy||"",scene:sr?.scene||"",prompt:sr?.imgPrompt||sr?.image_prompt||""};return <div className="sb-ov" onClick={()=>setSbEdit(null)}><div className="sb-mdl" onClick={e=>e.stopPropagation()}>
-            <div className="sb-mdl-t">编辑镜头 #{sbEdit+1} <button className="mdl-x" onClick={()=>setSbEdit(null)}><I.X/></button></div>
+          {/* Edit modal */}
+          {sbEdit!==null&&(()=>{const sr=sbShots[sbEdit]||(adopted?.table?.[sbEdit]);const _ed={copy:sr?.text||sr?.copy||"",scene:sr?.scene||"",prompt:sr?.imgPrompt||sr?.image_prompt||"",feedback:sr?.feedback||""};return <div className="sb-ov" onClick={()=>setSbEdit(null)}><div className="sb-mdl" onClick={e=>e.stopPropagation()} style={{maxWidth:600}}>
+            <div className="sb-mdl-t">编辑镜头 #{sbEdit+1} <span style={{fontSize:11,color:"var(--t3)",fontWeight:400,marginLeft:8}}>{SHOT_TAGS[sr?.tag]||sr?.tag} · {CAMERA_TAGS[sr?.camera]||sr?.camera} · {LIGHT_TAGS[sr?.lighting]||sr?.lighting} · {MOOD_TAGS[sr?.mood]||sr?.mood}</span><button className="mdl-x" onClick={()=>setSbEdit(null)}><I.X/></button></div>
+            {/* Image versions */}
+            {sr?.imageVersions?.length>0&&<div style={{display:"flex",gap:8,marginBottom:12,overflowX:"auto",padding:"4px 0"}}>
+              {sr.imageVersions.map((v,vi)=><img key={vi} src={v} onClick={()=>{pickVersion(sbEdit,vi);setSbShots(prev=>{const n=[...prev];return n;});}} style={{width:80,height:120,objectFit:"cover",borderRadius:8,border:sr.imageUrl===v?"3px solid var(--p)":"2px solid var(--bl)",cursor:"pointer",flexShrink:0}} alt={`v${vi+1}`}/>)}
+            </div>}
             <div className="sb-mdl-fg"><div className="sb-mdl-l">旁白台词</div><textarea className="sb-mdl-inp" rows={3} defaultValue={_ed.copy} onChange={e=>{_ed.copy=e.target.value;}}/></div>
             <div className="sb-mdl-fg"><div className="sb-mdl-l">画面描述</div><textarea className="sb-mdl-inp" rows={2} defaultValue={_ed.scene} onChange={e=>{_ed.scene=e.target.value;}}/></div>
             <div className="sb-mdl-fg"><div className="sb-mdl-l">AI生图提示词 (English)</div><textarea className="sb-mdl-inp" rows={3} defaultValue={_ed.prompt} onChange={e=>{_ed.prompt=e.target.value;}}/></div>
-            <div className="sb-mdl-foot">
+            <div className="sb-mdl-fg"><div className="sb-mdl-l">修改反馈 (驳回时填写)</div><textarea className="sb-mdl-inp" rows={2} defaultValue={_ed.feedback} placeholder="描述需要改进的方向..." onChange={e=>{_ed.feedback=e.target.value;}}/></div>
+            <div className="sb-mdl-foot" style={{flexWrap:"wrap"}}>
               <button className="sb-mdl-btn cancel" onClick={()=>setSbEdit(null)}>取消</button>
-              <button className="sb-mdl-btn orange" onClick={async()=>{const idx=sbEdit;setSbShots(prev=>{const n=[...prev];n[idx]={...n[idx],text:_ed.copy,scene:_ed.scene,imgPrompt:_ed.prompt};return n;});setSbEdit(null);setSbImgBusy(true);setSbGenStatus(`重新生成第${idx+1}张图片...`);try{const prompt=_ed.prompt||"product shot, professional photography";const r=await fetch("/api-proxy/v1/images/generations",{method:"POST",headers:API_HDRS,body:JSON.stringify({model:"gpt-image-1",prompt,n:1,size:"1024x1536",quality:"high"})});if(!r.ok)throw new Error("API错误");const buf=await r.arrayBuffer();const text=new TextDecoder().decode(buf);const d=JSON.parse(text);const item=d.data?.[0];let imgUrl=item?.url||(item?.b64_json?"data:image/png;base64,"+item.b64_json:null);if(imgUrl)setSbShots(prev=>{const n=[...prev];n[idx]={...n[idx],imageUrl:imgUrl};return n;});setSbGenStatus("图片重新生成完成");}catch(e){setSbGenStatus("图片生成失败: "+e.message);}finally{setSbImgBusy(false);}}} >保存并重新生成图片</button>
-              <button className="sb-mdl-btn blue" onClick={()=>{const idx=sbEdit;setSbShots(prev=>{const n=[...prev];n[idx]={...n[idx],text:_ed.copy,scene:_ed.scene,imgPrompt:_ed.prompt};return n;});setSbEdit(null);}}>仅保存文案</button>
+              <button className="sb-mdl-btn" style={{background:"#059669",color:"#fff"}} onClick={()=>{approveFrame(sbEdit);setSbEdit(null);}}>✓ 通过</button>
+              <button className="sb-mdl-btn" style={{background:"#DC2626",color:"#fff"}} onClick={()=>{const idx=sbEdit;rejectFrame(idx,_ed.feedback);setSbEdit(null);}}>✗ 驳回</button>
+              <button className="sb-mdl-btn orange" onClick={async()=>{const idx=sbEdit;setSbShots(prev=>{const n=[...prev];n[idx]={...n[idx],text:_ed.copy,scene:_ed.scene,imgPrompt:_ed.prompt};return n;});setSbEdit(null);regenFrame(idx,_ed.feedback);}}>保存并重新生成</button>
+              <button className="sb-mdl-btn blue" onClick={()=>{const idx=sbEdit;setSbShots(prev=>{const n=[...prev];n[idx]={...n[idx],text:_ed.copy,scene:_ed.scene,imgPrompt:_ed.prompt,feedback:_ed.feedback};return n;});setSbEdit(null);}}>仅保存文案</button>
             </div>
           </div></div>})()}
         </div>}
@@ -4040,11 +4216,12 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
               <div className="vg-t">视频生成中...</div>
               <div className="vg-bar-wrap"><div className="vg-bar"><div className="vg-bar-fill" style={{width:vgPct+"%"}}/></div><div className="vg-pct">{vgPct}%</div></div>
               <div className="vg-sub">{sbGenStatus||`视频片段 ${Math.min(Math.round(vgPct/100*sbShots.length),sbShots.length)}/${sbShots.length} 完成`}</div>
+              <div style={{fontSize:11,color:"var(--t3)",marginTop:4}}>已用时 {sbElapsed}秒 · 配音: {VOICES.find(v=>v.id===sbVoice)?.name||"晓晓"}</div>
               <div className="vg-timeline">
-                <div className={`vg-tl-item ${vgStep>=1?"done":vgStep===0?"on":""}`}>图生视频片段</div>
-                <div className={`vg-tl-item ${vgStep>=2?"done":vgStep===1?"on":""}`}>TTS配音生成</div>
-                <div className={`vg-tl-item ${vgStep>=3?"done":vgStep===2?"on":""}`}>FFmpeg合成</div>
-                <div className={`vg-tl-item ${vgStep>=4?"done":vgStep===3?"on":""}`}>完成</div>
+                <div className={`vg-tl-item ${vgStep>=1?"done":vgStep===0?"on":""}`}>TTS配音生成</div>
+                <div className={`vg-tl-item ${vgStep>=2?"done":vgStep===1?"on":""}`}>上传素材</div>
+                <div className={`vg-tl-item ${vgStep>=3?"done":vgStep===2?"on":""}`}>生成视频片段</div>
+                <div className={`vg-tl-item ${vgStep>=4?"done":vgStep===3?"on":""}`}>合成&完成</div>
               </div>
             </div>
           </div>
@@ -4062,7 +4239,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
               <div className="vp-player">{finalVideoUrl?<video src={finalVideoUrl} controls style={{width:"100%",height:"100%",borderRadius:"inherit",background:"#000"}}/>:<div className="vp-play"><I.Camera/></div>}</div>
               <div className="vp-info">
                 <div className="vp-info-t">{prod} · 脚本视频</div>
-                <div className="vp-info-meta"><span>⏱ {dur}</span><span>🎬 {sbShots.length}个分镜</span><span>📦 {cat}</span></div>
+                <div className="vp-info-meta"><span>⏱ {dur}</span><span>🎬 {sbShots.length}个分镜</span><span>📦 {cat}</span><span>⏳ 用时{sbElapsed}秒</span><span>🎙 {VOICES.find(v=>v.id===sbVoice)?.name||"晓晓"}</span></div>
                 <div className="vp-acts">
                   <button className="vp-act pri" onClick={()=>setPg("dash")}><I.Check/> 确认完成</button>
                   {finalVideoUrl&&<a href={finalVideoUrl} download={`${prod}_视频.mp4`} style={{textDecoration:"none"}}><button className="vp-act sec"><I.Download/> 导出视频</button></a>}
@@ -4078,7 +4255,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
         {/* DEEP CHAT CREATE */}
         {pg==="create-deep"&&<div className="sw">
           <div className="sl">
-            <div className="sl-hd"><div className="sl-bk" onClick={()=>setPg("dash")}><I.ArrowL/> 返回工作台</div></div>
+            <div className="sl-hd"><div className="sl-bk" onClick={()=>setPg("dash")}><I.ArrowL/> 返回工作台</div><button style={{marginLeft:"auto",padding:"4px 10px",borderRadius:6,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontFamily:"inherit"}} onClick={openModal}><I.Plus/> 新创作</button></div>
             <div className="dp-hd">
               <div className="dp-hd-t"><I.Bot/> AI 创作顾问</div>
               <div className="dp-hd-d">对话式深度挖掘你的创作需求</div>

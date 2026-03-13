@@ -1,6 +1,6 @@
 """
 WingAI Schedule Server — FastAPI + APScheduler + CDP automation.
-Run: cd server && python -m uvicorn main:app --port 8000 --reload
+Run: cd server && python -m uvicorn main:app --port 8000 --reload --reload-exclude "data/*" --reload-exclude "*.db" --reload-exclude "*.jsonl"
 """
 import logging
 import sys

@@ -175,7 +175,11 @@ async def publish_now(task_id: int, db: Session = Depends(get_db)):
     if not task:
         raise HTTPException(404, "Task not found")
     if task.status == "running":
-        raise HTTPException(400, "Task is already running")
+        # Allow retry if stuck for more than 5 minutes
+        from datetime import timedelta
+        if task.updated_at and (datetime.now() - task.updated_at) < timedelta(minutes=5):
+            raise HTTPException(400, "Task is still running, please wait")
+        log.warning(f"Task {task_id} was stuck in 'running' for >5min, resetting")
 
     task.status = "pending"
     task.updated_at = datetime.now()

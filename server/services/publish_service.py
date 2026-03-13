@@ -113,7 +113,7 @@ async def execute_task(task_id: int):
                 await session.navigate(domain_url)
                 await asyncio.sleep(2)
 
-            await session.send("Network.setCookies", {"cookies": cookies})
+            await session.set_cookies(cookies)
             _log_task(db, task_id, "info", f"Cookies injected ({len(cookies)} cookies)")
 
             # Refresh page so cookies take effect
@@ -122,10 +122,16 @@ async def execute_task(task_id: int):
                 await asyncio.sleep(3)
 
                 # Check if login form is still shown (cookies didn't work)
-                page_text = await session.evaluate("document.body.innerText.substring(0, 200)")
-                if "扫码登录" in page_text or "验证码登录" in page_text:
-                    _log_task(db, task_id, "warn", "Cookies did not restore login session")
-                    log.warning(f"Cookie restore failed, page shows: {page_text[:100]}")
+                url_now = await session.evaluate("window.location.href")
+                page_text = await session.evaluate("document.body.innerText.substring(0, 300)")
+                login_keywords = ["扫码登录", "验证码登录", "密码登录", "登录/注册",
+                                  "账号登录", "手机号登录", "立即登录", "请输入手机号"]
+                is_login_page = (any(kw in page_text for kw in login_keywords)
+                                 or "passport" in (url_now or "")
+                                 or "/login" in (url_now or ""))
+                if is_login_page:
+                    _log_task(db, task_id, "warn", f"Cookies did not restore login (url={url_now})")
+                    log.warning(f"Cookie restore failed, url={url_now}, page: {page_text[:100]}")
                 else:
                     _log_task(db, task_id, "info", "Cookie login confirmed")
         else:
