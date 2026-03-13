@@ -10,7 +10,9 @@ log = logging.getLogger(__name__)
 
 
 async def _chat(prompt: str, temperature=0.3) -> str:
-    async with httpx.AsyncClient(timeout=60) as c:
+    import os
+    proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+    async with httpx.AsyncClient(timeout=60, proxy=proxy) as c:
         r = await c.post(
             f"{AI_BASE_URL}/chat/completions",
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {AI_API_KEY}"},

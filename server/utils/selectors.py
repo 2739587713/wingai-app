@@ -32,6 +32,11 @@ SELECTORS = {
     # ─── Douyin ───
     "dy_upload_input": [
         'input[type="file"]',
+        'input[accept*="video"]',
+        'input[accept*="image"]',
+        'input[accept*="mp4"]',
+        '.upload-btn input',
+        '[class*="upload"] input',
     ],
     "dy_title_input": [
         'input[placeholder*="填写作品标题"]',

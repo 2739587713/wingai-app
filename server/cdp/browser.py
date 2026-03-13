@@ -161,6 +161,17 @@ class CDPSession:
             raise RuntimeError(f"JS error: {result['exceptionDetails']}")
         return result.get("result", {}).get("value")
 
+    async def minimize_window(self):
+        """Minimize the browser window to reduce visual interference."""
+        try:
+            await self.send("Browser.setWindowBounds", {
+                "windowId": 1,
+                "bounds": {"windowState": "minimized"}
+            })
+        except Exception:
+            # Browser.setWindowBounds may not be available
+            pass
+
     async def navigate(self, url: str, wait_event="load"):
         await self.send("Page.navigate", {"url": url})
         # Wait for load
@@ -179,7 +190,24 @@ class CDPSession:
         return result.get("cookies", [])
 
     async def set_cookies(self, cookies: list):
-        await self.send("Network.setCookies", {"cookies": cookies})
+        """Set cookies. Cleans up fields from getAllCookies format to setCookies format."""
+        cleaned = []
+        for c in cookies:
+            cookie = {
+                "name": c["name"],
+                "value": c["value"],
+                "domain": c.get("domain", ""),
+                "path": c.get("path", "/"),
+                "secure": c.get("secure", False),
+                "httpOnly": c.get("httpOnly", False),
+            }
+            if c.get("expires", -1) > 0:
+                cookie["expires"] = c["expires"]
+            if c.get("sameSite"):
+                cookie["sameSite"] = c["sameSite"]
+            cleaned.append(cookie)
+        if cleaned:
+            await self.send("Network.setCookies", {"cookies": cleaned})
 
     async def close(self):
         if self._listener_task:

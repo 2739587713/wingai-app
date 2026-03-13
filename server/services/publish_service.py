@@ -72,20 +72,64 @@ async def execute_task(task_id: int):
             _log_task(db, task_id, "info", f"Published successfully: {result_url}")
             return
 
-        # CDP-based platforms: launch browser
+        # CDP-based platforms: close any active login session for this account first
+        try:
+            from routers.accounts import _login_sessions
+            login_data = _login_sessions.pop(task.account_id, None)
+            if login_data:
+                log.info(f"Closing active login session for account {task.account_id}")
+                try:
+                    await login_data["session"].close()
+                except Exception:
+                    pass
+                from cdp.browser import kill_chrome as _kill
+                _kill(login_data["proc"])
+                await asyncio.sleep(1)  # Let Chrome release the profile lock
+        except Exception:
+            pass
+
+        # Launch browser (headed mode — headless is detected by most platforms)
         _log_task(db, task_id, "info", "Launching browser")
-        proc, port = launch_chrome(profile_dir=account.profile_dir, headless=True)
+        proc, port = launch_chrome(profile_dir=account.profile_dir, headless=False)
 
         ws_url = get_ws_url(port)
         session = CDPSession()
         await session.connect(ws_url)
+        await session.minimize_window()  # Keep window out of the way
         _log_task(db, task_id, "info", "Browser connected")
 
-        # Restore cookies if available
+        # Restore cookies: navigate to domain FIRST, then inject cookies, then refresh
         cookies = load_cookies(account)
         if cookies:
-            await session.set_cookies(cookies)
-            _log_task(db, task_id, "info", "Cookies restored")
+            # Navigate to the platform domain first so cookies can be set on correct domain
+            domain_urls = {
+                "douyin": "https://creator.douyin.com",
+                "xiaohongshu": "https://creator.xiaohongshu.com",
+                "kuaishou": "https://cp.kuaishou.com",
+            }
+            domain_url = domain_urls.get(task.platform)
+            if domain_url:
+                _log_task(db, task_id, "info", f"Navigating to {domain_url} for cookie injection")
+                await session.navigate(domain_url)
+                await asyncio.sleep(2)
+
+            await session.send("Network.setCookies", {"cookies": cookies})
+            _log_task(db, task_id, "info", f"Cookies injected ({len(cookies)} cookies)")
+
+            # Refresh page so cookies take effect
+            if domain_url:
+                await session.navigate(domain_url)
+                await asyncio.sleep(3)
+
+                # Check if login form is still shown (cookies didn't work)
+                page_text = await session.evaluate("document.body.innerText.substring(0, 200)")
+                if "扫码登录" in page_text or "验证码登录" in page_text:
+                    _log_task(db, task_id, "warn", "Cookies did not restore login session")
+                    log.warning(f"Cookie restore failed, page shows: {page_text[:100]}")
+                else:
+                    _log_task(db, task_id, "info", "Cookie login confirmed")
+        else:
+            _log_task(db, task_id, "warn", "No valid cookies found - login may be required")
 
         # Execute platform-specific publish
         _log_task(db, task_id, "info", f"Publishing to {task.platform}...")

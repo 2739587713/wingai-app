@@ -102,20 +102,28 @@ async def start_login(account_id: int, db: Session = Depends(get_db)):
     session = CDPSession()
     await session.connect(ws_url)
 
+    # Save session FIRST so polling can work even if screenshot fails
+    _login_sessions[account_id] = {"proc": proc, "session": session, "port": port}
+
     # Navigate to login page
     await session.navigate(urls["login"])
-    await asyncio.sleep(3)
+    await asyncio.sleep(5)  # Wait longer for page to fully load
 
-    # Take screenshot
-    screenshot = await take_screenshot(session)
-    screenshot_b64 = base64.b64encode(screenshot).decode()
-
-    _login_sessions[account_id] = {"proc": proc, "session": session, "port": port}
+    # Take screenshot (with retry)
+    screenshot_b64 = ""
+    for attempt in range(3):
+        try:
+            screenshot = await take_screenshot(session)
+            screenshot_b64 = base64.b64encode(screenshot).decode()
+            break
+        except Exception as e:
+            log.warning(f"Screenshot attempt {attempt+1} failed: {e}")
+            await asyncio.sleep(2)
 
     return {
         "status": "qr_ready",
-        "screenshot": f"data:image/png;base64,{screenshot_b64}",
-        "message": "请用手机扫描二维码登录",
+        "screenshot": f"data:image/png;base64,{screenshot_b64}" if screenshot_b64 else "",
+        "message": "请用手机扫描二维码登录（浏览器已打开）",
     }
 
 
@@ -135,37 +143,97 @@ async def check_login_status(account_id: int, db: Session = Depends(get_db)):
     try:
         # Check if we've been redirected away from login page
         url = await session.evaluate("window.location.href")
-        is_login_page = "/login" in url or "passport" in url
+        log.info(f"[Login] Account {account_id} current URL: {url}")
 
-        if not is_login_page:
-            # Logged in! Save cookies
-            cookies = await session.get_cookies()
-            save_cookies(acct, cookies)
-            db.commit()
+        # Detect pages that are still part of the login/verification flow
+        # These pages mean the user is NOT fully logged in yet
+        still_in_login_flow = any(p in url.lower() for p in [
+            "/login", "passport.", "sso.", "accounts.google", "signin",
+            "verify", "captcha", "sms", "phone", "security_check",
+            "authenticate", "validation",
+        ])
 
-            # Try to get nickname
-            nickname = await session.evaluate("""
-                (() => {
-                    const el = document.querySelector('.user-name, .nick-name, [class*="nickname"]');
-                    return el ? el.textContent.trim() : '';
-                })()
-            """) or acct.nickname
-            acct.nickname = nickname
-            db.commit()
+        # Also check page content for verification-related text
+        # (SMS code input, captcha, phone verification etc.)
+        is_verification_page = await session.evaluate("""
+            (() => {
+                const body = document.body.innerText || '';
+                const inputs = document.querySelectorAll('input[type="text"], input[type="tel"], input[type="number"]');
+                // Check for verification-related Chinese text
+                const verifyTexts = ['验证码', '短信验证', '输入验证码', '安全验证',
+                                     '手机验证', '请输入', '发送验证码', '获取验证码',
+                                     '滑块', '请完成验证', '点击验证'];
+                for (const t of verifyTexts) {
+                    if (body.includes(t)) return true;
+                }
+                return false;
+            })()
+        """)
 
-            # Cleanup
-            await session.close()
-            kill_chrome(login_data["proc"])
-            _login_sessions.pop(account_id, None)
+        if is_verification_page:
+            log.info(f"[Login] Account {account_id} on verification page, waiting...")
+            still_in_login_flow = True
 
-            return {"status": "logged_in", "nickname": nickname}
+        # Check if we're on a known "fully logged in" creator page
+        is_creator_page = any(p in url for p in [
+            "creator.douyin.com/creator-micro",
+            "creator.xiaohongshu.com/publish",
+            "creator.xiaohongshu.com/user",
+            "creator.xiaohongshu.com/",
+            "cp.kuaishou.com/article",
+            "cp.kuaishou.com/profile",
+            "cp.kuaishou.com/",
+        ])
+        if url.rstrip("/") == "https://creator.douyin.com":
+            is_creator_page = True
 
-        # Still on login page — return updated screenshot
+        # Check for avatar/user elements as strong login signal
+        has_user_element = await session.evaluate("""
+            (() => {
+                const el = document.querySelector('img[class*="avatar"], .user-name, .nick-name, [class*="nickname"], [class*="user-info"]');
+                return !!el;
+            })()
+        """)
+
+        # Only confirm login if:
+        # 1. On a known creator page with user elements, AND
+        # 2. NOT on a verification page
+        if not still_in_login_flow and (is_creator_page or has_user_element):
+            # Double check — must have avatar or be on creator-micro page
+            if is_creator_page or has_user_element:
+                # Logged in! Save cookies
+                cookies = await session.get_cookies()
+                save_cookies(acct, cookies)
+
+                acct.status = "active"
+                db.commit()
+
+                # Try to get nickname
+                nickname = await session.evaluate("""
+                    (() => {
+                        const el = document.querySelector('.user-name, .nick-name, [class*="nickname"]');
+                        return el ? el.textContent.trim() : '';
+                    })()
+                """) or acct.nickname
+                acct.nickname = nickname
+                db.commit()
+
+                # Cleanup
+                await session.close()
+                kill_chrome(login_data["proc"])
+                _login_sessions.pop(account_id, None)
+
+                return {"status": "logged_in", "nickname": nickname}
+
+        # Still in login/verification flow — return updated screenshot
         screenshot = await take_screenshot(session)
         screenshot_b64 = base64.b64encode(screenshot).decode()
+
+        status_msg = "请完成短信验证" if is_verification_page else "等待扫码登录"
         return {
             "status": "waiting",
             "screenshot": f"data:image/png;base64,{screenshot_b64}",
+            "message": status_msg,
         }
 
     except Exception as e:
