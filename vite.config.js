@@ -124,6 +124,11 @@ export default defineConfig({
         target: 'https://api.bltcy.ai',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/blt-proxy/, '')
+      },
+      '/schedule-api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/schedule-api/, '')
       }
     }
   }

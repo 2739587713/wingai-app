@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Browser profile data
+server/data/profiles/
+server/__pycache__/
+**/__pycache__/

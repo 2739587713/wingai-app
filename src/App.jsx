@@ -214,6 +214,129 @@ export default function App(){
   const [schModal,setSchModal]=useState(false);
   const [schTab,setSchTab]=useState(0);
   const [schColor,setSchColor]=useState(0);
+  // schedule backend state
+  const [schTasks,setSchTasks]=useState([]);
+  const [schAccounts,setSchAccounts]=useState([]);
+  const [schStats,setSchStats]=useState({total:0,published:0,pending:0,failed:0,running:0,completion_rate:0});
+  const [schSelAccount,setSchSelAccount]=useState("");
+  const [schTitle,setSchTitle]=useState("");
+  const [schDesc,setSchDesc]=useState("");
+  const [schDate,setSchDate]=useState(()=>{const d=new Date();return d.toISOString().slice(0,10)});
+  const [schTime,setSchTime]=useState("18:00");
+  const [schFiles,setSchFiles]=useState([]);
+  const [schContentType,setSchContentType]=useState("image"); // image/video
+  const [schPlatBtns,setSchPlatBtns]=useState([false,false,false,false]); // 抖快红微
+  const [schPublishing,setSchPublishing]=useState(false);
+  const [schQrModal,setSchQrModal]=useState(null); // account id or null
+  const [schQrImg,setSchQrImg]=useState("");
+  const [schQrStatus,setSchQrStatus]=useState("");
+  const [schAiTimes,setSchAiTimes]=useState([]);
+  const [schTaskLogs,setSchTaskLogs]=useState([]);
+  const [schLogModal,setSchLogModal]=useState(null); // task id or null
+  const [schAcctModal,setSchAcctModal]=useState(false);
+  const [schNewAcctPlat,setSchNewAcctPlat]=useState("xiaohongshu");
+  const [schNewAcctName,setSchNewAcctName]=useState("");
+  const schPlatMap=["douyin","kuaishou","xiaohongshu","wechat"];
+  const schPlatLabels=["抖音","快手","小红书","公众号"];
+  const schFileRef=useRef(null);
+  // schedule data fetching
+  const schFetchAll=async()=>{
+    const m=`${schYear}-${String(schMonth+1).padStart(2,'0')}`;
+    try{
+      const [tRes,aRes,sRes]=await Promise.all([
+        fetch(`/schedule-api/tasks?month=${m}`).then(r=>r.json()),
+        fetch('/schedule-api/accounts').then(r=>r.json()),
+        fetch(`/schedule-api/stats/monthly?month=${m}`).then(r=>r.json()),
+      ]);
+      setSchTasks(Array.isArray(tRes)?tRes:[]);
+      setSchAccounts(Array.isArray(aRes)?aRes:[]);
+      if(sRes&&typeof sRes.total==='number')setSchStats(sRes);
+    }catch(e){console.log('[schedule] fetch error:',e.message)}
+  };
+  useEffect(()=>{if(pg==="schedule")schFetchAll();},[pg,schMonth,schYear]);
+  const schCreateTask=async()=>{
+    const selPlats=schPlatBtns.map((on,i)=>on?schPlatMap[i]:null).filter(Boolean);
+    if(!selPlats.length)return alert("请选择至少一个发布平台");
+    if(!schSelAccount)return alert("请选择发布账号");
+    if(!schTitle.trim())return alert("请输入标题");
+    if(schTab!==1&&schFiles.length===0)return alert(schContentType==="video"?"请上传视频文件":"请上传至少一张素材图片");
+    setSchPublishing(true);
+    try{
+      const dt=`${schDate}T${schTime}:00`;
+      const mediaPaths=schFiles.map(f=>f.serverPath).filter(Boolean);
+      for(const plat of selPlats){
+        const acct=schAccounts.find(a=>a.platform===plat&&a.id===Number(schSelAccount))||schAccounts.find(a=>a.platform===plat);
+        if(!acct){alert(`未找到${plat}平台的账号`);continue;}
+        await fetch('/schedule-api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          account_id:acct.id,platform:plat,content_type:schContentType,title:schTitle,content:schDesc,
+          scheduled_at:dt,color:["#3B82F6","#10B981","#7C3AED","#F97316","#F43F5E"][schColor],
+          category:["sell","edu","story","daily","daily"][schColor],
+          media_paths:mediaPaths,tags:[],
+        })});
+      }
+      setSchModal(false);setSchTitle("");setSchDesc("");setSchFiles([]);setSchContentType("image");
+      schFetchAll();
+    }catch(e){alert("创建失败: "+e.message)}
+    setSchPublishing(false);
+  };
+  const schDeleteTask=async(id)=>{await fetch(`/schedule-api/tasks/${id}`,{method:'DELETE'});schFetchAll();};
+  const schPublishNow=async(id)=>{await fetch(`/schedule-api/tasks/${id}/publish-now`,{method:'POST'});schFetchAll();};
+  const schUploadFile=async(file)=>{
+    const fd=new FormData();fd.append('file',file);
+    const r=await fetch('/schedule-api/tasks/upload-media',{method:'POST',body:fd});
+    const d=await r.json();
+    return d.path;
+  };
+  const schHandleFiles=async(e)=>{
+    const files=Array.from(e.target.files);
+    const uploaded=[];
+    for(const f of files){
+      const serverPath=await schUploadFile(f);
+      uploaded.push({name:f.name,serverPath,preview:URL.createObjectURL(f)});
+    }
+    setSchFiles(prev=>[...prev,...uploaded]);
+  };
+  const schStartLogin=async(acctId)=>{
+    setSchQrModal(acctId);setSchQrStatus("loading");
+    try{
+      const r=await fetch(`/schedule-api/accounts/${acctId}/login`,{method:'POST'});
+      const d=await r.json();
+      setSchQrImg(d.screenshot||"");setSchQrStatus("qr_ready");
+      // Start polling
+      const poll=setInterval(async()=>{
+        try{
+          const sr=await fetch(`/schedule-api/accounts/${acctId}/login-status`);
+          const sd=await sr.json();
+          if(sd.status==="logged_in"){clearInterval(poll);setSchQrStatus("done");schFetchAll();setTimeout(()=>setSchQrModal(null),1500);}
+          else if(sd.status==="waiting"&&sd.screenshot)setSchQrImg(sd.screenshot);
+          else if(sd.status==="error"){clearInterval(poll);setSchQrStatus("error");}
+        }catch{}
+      },3000);
+    }catch(e){setSchQrStatus("error")}
+  };
+  const schAddAccount=async()=>{
+    if(!schNewAcctName.trim())return;
+    await fetch('/schedule-api/accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:schNewAcctPlat,nickname:schNewAcctName})});
+    setSchNewAcctName("");setSchAcctModal(false);schFetchAll();
+  };
+  const schDeleteAccount=async(id)=>{await fetch(`/schedule-api/accounts/${id}`,{method:'DELETE'});schFetchAll();};
+  const [schAiLoading,setSchAiLoading]=useState(false);
+  const [schAiAnalysis,setSchAiAnalysis]=useState(null);
+  const schGetAiTime=async()=>{
+    const plat=schPlatBtns.findIndex(Boolean);
+    const platName=plat>=0?schPlatMap[plat]:"xiaohongshu";
+    if(!schTitle.trim()&&!schDesc.trim()){return alert("请先填写标题或内容，AI将根据内容智能推荐发布时间")}
+    setSchAiLoading(true);setSchAiAnalysis(null);setSchAiTimes([]);
+    try{
+      const r=await fetch('/schedule-api/ai/recommend-time',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:platName,category:["sell","edu","story","daily","daily"][schColor],title:schTitle,content:schDesc})});
+      const d=await r.json();
+      setSchAiTimes(d.recommendations||[]);
+      setSchAiAnalysis({type:d.content_type||"",audience:d.target_audience||""});
+    }catch{setSchAiTimes([])}
+    setSchAiLoading(false);
+  };
+  const schGetTasksForDay=(day)=>schTasks.filter(t=>{if(!t.scheduled_at)return false;const d=new Date(t.scheduled_at);return d.getDate()===day&&d.getMonth()===schMonth&&d.getFullYear()===schYear;});
+  const schTodayTasks=schGetTasksForDay(new Date().getDate());
   const getCalDays=()=>{
     const first=new Date(schYear,schMonth,1);const last=new Date(schYear,schMonth+1,0);
     const startDay=(first.getDay()+6)%7;const days=[];
@@ -1834,38 +1957,165 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
 .sch-detail-t{font-size:13px;font-weight:700;display:flex;justify-content:space-between;margin-bottom:8px}
 .sch-detail-ct{font-size:11px;color:var(--t3);font-weight:400}
 /* schedule modal */
-.sch-ov{position:fixed;inset:0;background:rgba(0,0,0,.4);backdrop-filter:blur(4px);z-index:100;display:flex;align-items:center;justify-content:center}
-.sch-mdl{background:var(--s);border-radius:18px;width:92%;max-width:820px;max-height:85vh;display:flex;box-shadow:0 20px 60px rgba(0,0,0,.15);animation:mIn .25s ease;overflow:hidden}
-.sch-mdl-main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-.sch-mdl-hd{padding:18px 24px;border-bottom:1px solid var(--bl);display:flex;justify-content:space-between;align-items:center}
-.sch-mdl-t{font-size:17px;font-weight:800}
-.sch-mdl-tabs{display:flex;border:1.5px solid var(--bl);border-radius:10px;overflow:hidden;margin:16px 24px 0}
-.sch-mdl-tab{flex:1;padding:9px;text-align:center;font-size:12px;font-weight:500;cursor:pointer;background:var(--s);color:var(--t2);font-family:inherit;border:none;transition:var(--tr)}.sch-mdl-tab:not(:last-child){border-right:1.5px solid var(--bl)}
+.sch-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);z-index:100;display:flex;align-items:center;justify-content:center}
+.sch-mdl{background:var(--s);border-radius:20px;width:94%;max-width:920px;max-height:88vh;display:flex;box-shadow:0 24px 80px rgba(0,0,0,.18);animation:mIn .25s ease;overflow:hidden}
+.sch-mdl-main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.sch-mdl-hd{padding:20px 28px 16px;border-bottom:1px solid var(--bl);display:flex;justify-content:space-between;align-items:flex-start}
+.sch-mdl-t{font-size:18px;font-weight:800}
+.sch-mdl-tabs{display:flex;border:1.5px solid var(--bl);border-radius:10px;overflow:hidden;margin:0 28px}
+.sch-mdl-tab{flex:1;padding:9px;text-align:center;font-size:12px;font-weight:600;cursor:pointer;background:var(--s);color:var(--t2);font-family:inherit;border:none;transition:var(--tr)}.sch-mdl-tab:not(:last-child){border-right:1.5px solid var(--bl)}
 .sch-mdl-tab.on{background:var(--p);color:#fff}
-.sch-mdl-body{flex:1;overflow-y:auto;padding:20px 24px}
+.sch-mdl-body{flex:1;overflow-y:auto;padding:20px 28px 24px}
 .sch-mdl-body::-webkit-scrollbar{width:4px}.sch-mdl-body::-webkit-scrollbar-thumb{background:var(--b);border-radius:2px}
-.sch-plats{display:flex;gap:8px;margin-bottom:16px}
-.sch-plat-btn{width:40px;height:40px;border-radius:50%;border:2px solid var(--bl);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;font-weight:700;transition:var(--tr)}.sch-plat-btn:hover{border-color:var(--pl)}
-.sch-plat-btn.on{border-color:var(--p);box-shadow:0 0 0 3px var(--pg)}
-.sch-cover{width:120px;height:120px;border:2px dashed var(--bl);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;color:var(--t3);font-size:10px;gap:4px;transition:var(--tr);flex-shrink:0}
-.sch-cover:hover{border-color:var(--pl);color:var(--p)}
-.sch-content-row{display:flex;gap:14px;margin-bottom:16px}
-.sch-content-fields{flex:1;display:flex;flex-direction:column;gap:10px}
-.sch-plan-bar{background:var(--s2);border-radius:12px;padding:14px;border:1px solid var(--bl)}
-.sch-plan-bar-t{font-size:11px;font-weight:600;color:var(--p);margin-bottom:8px}
-.sch-plan-bar-row{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--t2)}
-.sch-colors{display:flex;gap:8px;margin-left:auto}
-.sch-color{width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:var(--tr);position:relative}
-.sch-color.on{border-color:var(--t1)}.sch-color.on::after{content:'✓';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700}
-.sch-mdl-foot{display:flex;justify-content:flex-end;gap:8px;padding:14px 24px;border-top:1px solid var(--bl)}
-.sch-mdl-foot .sch-f-btn{padding:9px 24px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:var(--tr)}
+/* sections */
+.sch-section{margin-bottom:20px}
+.sch-section-t{font-size:13px;font-weight:700;color:var(--t1);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sch-step-n{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,var(--p),var(--pl));color:#fff;font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.sch-required{font-size:10px;color:var(--r);font-weight:600;padding:2px 8px;border-radius:4px;background:#FEF2F2}
+/* platforms */
+.sch-plats{display:flex;gap:8px;flex-wrap:wrap}
+.sch-plat-chip{display:flex;align-items:center;gap:6px;padding:7px 16px;border-radius:20px;border:1.5px solid var(--bl);cursor:pointer;font-size:12px;font-weight:600;color:var(--t2);transition:var(--tr);background:var(--s)}
+.sch-plat-chip:hover{border-color:var(--pc);color:var(--pc)}
+.sch-plat-chip.on{border-color:var(--pc);background:var(--pbg2);color:var(--pc);box-shadow:0 0 0 2px color-mix(in srgb,var(--pc) 15%,transparent)}
+.sch-plat-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.sch-sel{padding:8px 14px;border-radius:10px;border:1.5px solid var(--bl);font-size:12px;font-family:inherit;background:var(--s);color:var(--t1);outline:none;min-width:180px;transition:var(--tr)}.sch-sel:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pg)}
+/* content type toggle */
+.sch-type-toggle{display:flex;gap:8px;margin-bottom:12px}
+.sch-type-btn{flex:1;display:flex;align-items:center;gap:8px;padding:12px 16px;border-radius:12px;border:1.5px solid var(--bl);cursor:pointer;transition:var(--tr);background:var(--s)}
+.sch-type-btn:hover{border-color:var(--pl);background:var(--s2)}
+.sch-type-btn.on{border-color:var(--p);background:var(--pbg);box-shadow:0 0 0 2px var(--pg)}
+.sch-type-btn span{font-size:13px;font-weight:600;color:var(--t1)}
+.sch-type-btn.on span{color:var(--p)}
+.sch-type-desc{font-size:10px!important;font-weight:400!important;color:var(--t3)!important;margin-left:auto}
+/* video upload */
+.sch-video-add{width:100%;padding:28px;border:2px dashed var(--bl);border-radius:14px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;color:var(--t3);font-size:12px;transition:var(--tr)}
+.sch-video-add:hover{border-color:var(--p);color:var(--p);background:var(--pbg)}
+.sch-video-preview{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;background:var(--s2);border:1px solid var(--bl);width:100%}
+.sch-video-icon{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,var(--p),var(--pl));color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sch-video-info{flex:1;min-width:0}
+/* media upload zone */
+.sch-media-zone{display:flex;gap:10px;flex-wrap:wrap}
+.sch-media-add{width:100px;height:100px;border:2px dashed var(--bl);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;color:var(--t3);font-size:11px;gap:3px;transition:var(--tr);flex-shrink:0}
+.sch-media-add:hover{border-color:var(--p);color:var(--p);background:var(--pbg)}
+.sch-media-item{width:100px;height:100px;border-radius:12px;overflow:hidden;position:relative;border:1px solid var(--bl)}
+.sch-media-item img{width:100%;height:100%;object-fit:cover}
+.sch-media-del{position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transition:var(--tr)}
+.sch-media-item:hover .sch-media-del{opacity:1}
+.sch-media-cover{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(124,58,237,.8));color:#fff;font-size:9px;font-weight:700;text-align:center;padding:2px 0 3px;letter-spacing:1px}
+.sch-media-hint{font-size:11px;color:var(--r);margin-top:6px;display:flex;align-items:center;gap:4px}
+/* content inputs */
+.sch-inp-title{width:100%;padding:12px 16px;border-radius:12px;border:1.5px solid var(--bl);font-size:15px;font-weight:700;font-family:inherit;outline:none;color:var(--t1);background:var(--s);transition:var(--tr)}
+.sch-inp-title:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pg)}
+.sch-inp-title::placeholder{color:var(--t3);font-weight:400}
+.sch-inp-content{width:100%;padding:12px 16px;border-radius:12px;border:1.5px solid var(--bl);font-size:13px;font-family:inherit;outline:none;color:var(--t1);background:var(--s);resize:vertical;line-height:1.6;transition:var(--tr);margin-top:10px}
+.sch-inp-content:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pg)}
+.sch-inp-content::placeholder{color:var(--t3)}
+/* time grid */
+.sch-time-grid{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.sch-time-item{flex:1;min-width:140px}
+.sch-time-lbl{font-size:11px;color:var(--t3);margin-bottom:5px;display:flex;align-items:center;gap:4px}
+.sch-time-inp{width:100%;padding:10px 14px;border-radius:10px;border:1.5px solid var(--bl);font-size:13px;font-family:inherit;outline:none;color:var(--t1);background:var(--s);transition:var(--tr)}
+.sch-time-inp:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pg)}
+.sch-colors{display:flex;gap:6px;flex-wrap:wrap}
+.sch-color-tag{padding:6px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;border:1.5px solid var(--bl);color:var(--t2);transition:var(--tr);background:var(--s)}
+.sch-color-tag:hover{border-color:var(--cc);color:var(--cc)}
+.sch-color-tag.on{border-color:var(--cc);background:color-mix(in srgb,var(--cc) 10%,transparent);color:var(--cc);font-weight:700}
+/* footer */
+.sch-mdl-foot{display:flex;align-items:center;gap:8px;padding:14px 28px;border-top:1px solid var(--bl)}
+.sch-foot-info{flex:1;font-size:11px;color:var(--t3)}
+.sch-mdl-foot .sch-f-btn{padding:10px 28px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:var(--tr)}
 .sch-f-cancel{border:1px solid var(--bl);background:var(--s);color:var(--t2)}.sch-f-cancel:hover{background:var(--s3)}
-.sch-f-confirm{border:none;background:var(--p);color:#fff;box-shadow:0 2px 8px rgba(124,58,237,.25)}.sch-f-confirm:hover{background:var(--pd)}
-/* AI time helper */
-.sch-ai{width:240px;min-width:240px;background:var(--s2);border-left:1px solid var(--bl);padding:16px;display:flex;flex-direction:column}
-.sch-ai-t{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;margin-bottom:12px}
-.sch-ai-btn{width:100%;padding:10px;border-radius:10px;border:none;background:var(--p);color:#fff;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:5px;margin-bottom:14px}
-.sch-ai-lbl{font-size:11px;color:var(--t3)}
+.sch-f-confirm{border:none;background:linear-gradient(135deg,var(--p),var(--pl));color:#fff;box-shadow:0 4px 14px rgba(124,58,237,.3)}.sch-f-confirm:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(124,58,237,.35)}
+.sch-f-confirm:disabled{opacity:.5;cursor:not-allowed;transform:none}
+/* AI sidebar */
+.sch-ai{width:280px;min-width:280px;background:var(--s2);border-left:1px solid var(--bl);padding:20px;display:flex;flex-direction:column;overflow-y:auto}
+.sch-ai::-webkit-scrollbar{width:4px}.sch-ai::-webkit-scrollbar-thumb{background:var(--b);border-radius:2px}
+.sch-ai-head{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.sch-ai-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#F59E0B,#F97316);display:flex;align-items:center;justify-content:center;color:#fff}
+.sch-ai-t{font-size:14px;font-weight:800}
+.sch-ai-btn{width:100%;padding:11px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--p),var(--pl));color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:16px;transition:var(--tr);box-shadow:0 4px 14px rgba(124,58,237,.2)}
+.sch-ai-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(124,58,237,.3)}
+.sch-ai-btn:disabled{opacity:.7;cursor:not-allowed;transform:none}
+.sch-ai-spin{width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;flex-shrink:0}
+.sch-ai-empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:30px 10px;color:var(--t3);font-size:12px;text-align:center}
+.sch-ai-analysis{background:var(--s);border:1px solid var(--bl);border-radius:12px;padding:12px;margin-bottom:14px}
+.sch-ai-analysis-row{font-size:11px;color:var(--t2);margin-bottom:6px;display:flex;align-items:flex-start;gap:6px;line-height:1.4}
+.sch-ai-analysis-row:last-child{margin-bottom:0}
+.sch-ai-tag{font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--pbg);color:var(--p);flex-shrink:0;white-space:nowrap}
+.sch-ai-lbl{font-size:11px;font-weight:700;color:var(--t3);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+.sch-ai-card{padding:14px;background:var(--s);border-radius:14px;margin-bottom:8px;cursor:pointer;border:1.5px solid var(--bl);transition:var(--tr)}
+.sch-ai-card:hover{border-color:var(--p);transform:translateY(-2px);box-shadow:0 6px 20px rgba(124,58,237,.1)}
+.sch-ai-card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.sch-ai-card-time{font-size:18px;font-weight:800;color:var(--p)}
+.sch-ai-card-score{font-size:16px;font-weight:800;color:var(--o)}.sch-ai-card-score span{font-size:11px;font-weight:400;color:var(--t3)}
+.sch-ai-card-range{font-size:10px;color:var(--t3);margin-bottom:6px}
+.sch-ai-card-reason{font-size:11px;color:var(--t2);line-height:1.5;margin-bottom:6px}
+.sch-ai-card-tip{font-size:10px;color:var(--p);display:flex;align-items:flex-start;gap:4px;padding:6px 8px;background:var(--pbg);border-radius:6px;line-height:1.4;margin-bottom:6px}
+.sch-ai-card-use{font-size:10px;color:var(--t3);text-align:center;opacity:0;transition:var(--tr)}
+.sch-ai-card:hover .sch-ai-card-use{opacity:1;color:var(--p)}
+/* account panel */
+.sch-acct-panel{background:var(--s);border:1px solid var(--bl);border-radius:14px;padding:16px;margin-bottom:14px}
+.sch-acct-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.sch-acct-hd-t{font-size:13px;font-weight:700;display:flex;align-items:center;gap:5px}
+.sch-acct-add-btn{display:flex;align-items:center;gap:4px;padding:5px 14px;border-radius:8px;border:1.5px dashed var(--p);background:var(--pbg);color:var(--p);font-size:11px;font-weight:600;cursor:pointer;transition:var(--tr);font-family:inherit}
+.sch-acct-add-btn:hover{background:var(--p);color:#fff;border-style:solid}
+.sch-acct-empty{text-align:center;padding:18px 10px;color:var(--t3)}
+.sch-acct-empty-icon{font-size:28px;margin-bottom:6px;opacity:.4}
+.sch-acct-empty-t{font-size:12px;font-weight:500}
+.sch-acct-empty-d{font-size:10px;margin-top:2px}
+.sch-acct-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--s2);margin-bottom:6px;transition:var(--tr)}
+.sch-acct-item:hover{background:var(--s3)}
+.sch-acct-plat{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0}
+.sch-acct-info{flex:1;min-width:0}
+.sch-acct-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sch-acct-plat-name{font-size:10px;color:var(--t3)}
+.sch-acct-status{font-size:9px;font-weight:600;padding:3px 8px;border-radius:6px}
+.sch-acct-actions{display:flex;gap:6px;align-items:center}
+.sch-acct-act{font-size:10px;padding:3px 10px;border-radius:6px;cursor:pointer;font-weight:600;border:none;font-family:inherit;transition:var(--tr)}
+.sch-acct-act.login{background:var(--p);color:#fff}.sch-acct-act.login:hover{background:var(--pd)}
+.sch-acct-act.del{background:none;color:var(--t3);padding:3px 4px}.sch-acct-act.del:hover{color:var(--r)}
+/* nice modals */
+.sch-nice-modal{background:var(--s);border-radius:20px;box-shadow:0 24px 80px rgba(0,0,0,.2);overflow:hidden;animation:mIn .2s ease}
+.sch-nm-hd{padding:24px 28px 0;display:flex;justify-content:space-between;align-items:center}
+.sch-nm-t{font-size:18px;font-weight:800}
+.sch-nm-body{padding:20px 28px 28px}
+.sch-nm-plat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:20px}
+.sch-nm-plat-card{padding:16px;border-radius:12px;border:2px solid var(--bl);cursor:pointer;transition:var(--tr);text-align:center}
+.sch-nm-plat-card:hover{border-color:var(--pl);transform:translateY(-2px);box-shadow:0 4px 14px rgba(0,0,0,.06)}
+.sch-nm-plat-card.on{border-color:var(--p);background:var(--pbg);box-shadow:0 0 0 3px var(--pg)}
+.sch-nm-plat-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:#fff;margin:0 auto 8px}
+.sch-nm-plat-name{font-size:13px;font-weight:700}
+.sch-nm-plat-desc{font-size:10px;color:var(--t3);margin-top:2px}
+.sch-nm-input{width:100%;padding:12px 16px;border-radius:10px;border:1.5px solid var(--bl);font-size:13px;font-family:inherit;outline:none;transition:var(--tr);background:var(--s);color:var(--t1)}
+.sch-nm-input:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pg)}
+.sch-nm-input::placeholder{color:var(--t3)}
+.sch-nm-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.sch-nm-btn{padding:10px 28px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;border:none;font-family:inherit;transition:var(--tr)}
+.sch-nm-btn.pri{background:var(--p);color:#fff;box-shadow:0 4px 12px rgba(124,58,237,.25)}.sch-nm-btn.pri:hover{background:var(--pd);transform:translateY(-1px)}
+.sch-nm-btn.sec{background:var(--s2);color:var(--t2);border:1px solid var(--bl)}.sch-nm-btn.sec:hover{background:var(--s3)}
+/* qr modal */
+.sch-qr-wrap{text-align:center;padding:8px 0}
+.sch-qr-title{font-size:20px;font-weight:800;margin-bottom:4px}
+.sch-qr-sub{font-size:12px;color:var(--t3);margin-bottom:20px}
+.sch-qr-img{max-width:100%;border-radius:12px;border:2px solid var(--bl);box-shadow:0 8px 30px rgba(0,0,0,.08)}
+.sch-qr-loading{padding:60px 0;color:var(--t3);font-size:13px}
+.sch-qr-loading::before{content:'';display:block;width:36px;height:36px;border:3px solid var(--bl);border-top-color:var(--p);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.sch-qr-success{padding:50px 0}
+.sch-qr-success-icon{width:56px;height:56px;border-radius:50%;background:#DCFCE7;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:24px}
+.sch-qr-success-t{font-size:16px;font-weight:700;color:#16A34A}
+.sch-qr-error{padding:50px 0;color:var(--r);font-size:13px}
+/* task detail modal */
+.sch-td-header{display:flex;gap:12px;align-items:flex-start;margin-bottom:16px}
+.sch-td-plat{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:#fff;flex-shrink:0}
+.sch-td-info{flex:1}
+.sch-td-title{font-size:16px;font-weight:700}
+.sch-td-meta{font-size:11px;color:var(--t3);margin-top:3px;display:flex;gap:8px;align-items:center}
+.sch-td-status{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:4px 12px;border-radius:8px}
+.sch-td-error{font-size:11px;padding:10px 14px;background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;color:#B91C1C;margin-bottom:14px;line-height:1.5}
+.sch-td-link{font-size:12px;padding:10px 14px;background:var(--pbg);border:1px solid var(--pl);border-radius:10px;margin-bottom:14px}
+.sch-td-link a{color:var(--p);font-weight:600;text-decoration:none}.sch-td-link a:hover{text-decoration:underline}
+.sch-td-actions{display:flex;gap:8px;margin-top:16px}
 /* tmpl lib */
 .tt{display:flex;border-bottom:1px solid var(--bl);margin-bottom:16px}.tti{padding:9px 16px;font-size:12px;font-weight:500;color:var(--t3);cursor:pointer;border:none;background:none;border-bottom:2px solid transparent;font-family:inherit}.tti.on{color:var(--p);border-bottom-color:var(--p);font-weight:600}
 .fr{display:flex;gap:20px;margin-bottom:16px}.fg{display:flex;align-items:center;gap:6px}.fl{font-size:12px;font-weight:600;color:var(--t2)}.fcs{display:flex;gap:5px}
@@ -2560,9 +2810,16 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                 if(wi>0&&!days.some(d=>d.cur))return null;
                 return <tr key={wi}>
                   <td><div className="sch-wk-n">WEEK {String(wi+1).padStart(2,'0')}</div><div className="sch-wk-d">点击设置周目标</div></td>
-                  {days.map((d,di)=><td key={di} className={`${d.cur?"":"dim"} ${d.today?"today":""}`} onClick={()=>setSchModal(true)}>
-                    <div className="day-n">{d.d}{d.today&&<span className="sch-today-badge">今天</span>}</div>
-                  </td>)}
+                  {days.map((d,di)=>{
+                    const dayTasks=d.cur?schGetTasksForDay(d.d):[];
+                    return <td key={di} className={`${d.cur?"":"dim"} ${d.today?"today":""}`} onClick={()=>{setSchDate(`${schYear}-${String(schMonth+1).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`);setSchModal(true);}}>
+                      <div className="day-n">{d.d}{d.today&&<span className="sch-today-badge">今天</span>}</div>
+                      {dayTasks.slice(0,3).map(t=><div key={t.id} className="sch-cal-task" style={{background:t.color||"var(--p)",color:"#fff",fontSize:9,padding:"1px 4px",borderRadius:3,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer"}} onClick={e=>{e.stopPropagation();setSchLogModal(t.id);}} title={`${t.title} [${t.status}]`}>
+                        {t.status==="success"?"✓ ":t.status==="failed"?"✗ ":t.status==="running"?"⟳ ":"◷ "}{t.title||t.platform}
+                      </div>)}
+                      {dayTasks.length>3&&<div style={{fontSize:8,color:"var(--t3)",marginTop:1}}>+{dayTasks.length-3}个</div>}
+                    </td>;
+                  })}
                 </tr>;
               })}
             </tbody></table></div>
@@ -2581,24 +2838,61 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
           <div className="sch-side">
             <div className="sch-side-t">本月执行看板</div>
             <div className="sch-board">
-              <div className="sch-board-row"><div><div className="sch-board-lbl">已发布内容</div><div className="sch-board-v">0<span style={{fontSize:12,color:"var(--t3)",fontWeight:400}}>/0 条</span></div></div><div><div className="sch-board-lbl" style={{textAlign:"right"}}>月达成率</div><div className="sch-board-pct">0%</div></div></div>
-              <div className="sch-board-sub"><span>待发布 0</span><span style={{color:"var(--r)"}}>异常数 0</span></div>
+              <div className="sch-board-row"><div><div className="sch-board-lbl">已发布内容</div><div className="sch-board-v">{schStats.published}<span style={{fontSize:12,color:"var(--t3)",fontWeight:400}}>/{schStats.total} 条</span></div></div><div><div className="sch-board-lbl" style={{textAlign:"right"}}>月达成率</div><div className="sch-board-pct">{schStats.completion_rate}%</div></div></div>
+              <div className="sch-board-sub"><span>待发布 {schStats.pending}</span><span style={{color:"var(--r)"}}>异常数 {schStats.failed}</span></div>
             </div>
 
             <div className="sch-focus">
               <div className="sch-focus-tag">FOCUS OF TODAY / 今日重点</div>
-              <div className="sch-focus-t">今日目标: 暂无发布任务</div>
-              <div className="sch-focus-d">休息一下，或者开始规划明天的精彩内容吧！</div>
+              <div className="sch-focus-t">今日目标: {schTodayTasks.length?`${schTodayTasks.length}个发布任务`:"暂无发布任务"}</div>
+              <div className="sch-focus-d">{schTodayTasks.length?schTodayTasks.map(t=>`${new Date(t.scheduled_at).toTimeString().slice(0,5)} ${t.title}`).join(" | "):"休息一下，或者开始规划明天的精彩内容吧！"}</div>
+            </div>
+
+            {/* 账号管理 */}
+            <div className="sch-acct-panel">
+              <div className="sch-acct-hd">
+                <div className="sch-acct-hd-t"><I.People/> 发布账号</div>
+                <button className="sch-acct-add-btn" onClick={()=>setSchAcctModal(true)}><I.Plus/> 添加账号</button>
+              </div>
+              {schAccounts.length===0&&<div className="sch-acct-empty">
+                <div className="sch-acct-empty-icon"><I.User/></div>
+                <div className="sch-acct-empty-t">还没有绑定账号</div>
+                <div className="sch-acct-empty-d">点击上方按钮添加你的第一个平台账号</div>
+              </div>}
+              {schAccounts.map(a=><div key={a.id} className="sch-acct-item">
+                <div className="sch-acct-plat" style={{background:{"xiaohongshu":"#FF2442","douyin":"#111","kuaishou":"#FF6600","wechat":"#07C160"}[a.platform]||"#999"}}>{{"xiaohongshu":"红","douyin":"抖","kuaishou":"快","wechat":"微"}[a.platform]}</div>
+                <div className="sch-acct-info">
+                  <div className="sch-acct-name">{a.nickname}</div>
+                  <div className="sch-acct-plat-name">{{"xiaohongshu":"小红书","douyin":"抖音","kuaishou":"快手","wechat":"微信公众号"}[a.platform]}</div>
+                </div>
+                <span className="sch-acct-status" style={{background:a.status==="active"?"#DCFCE7":a.status==="login_required"?"#FEF3C7":"#FEE2E2",color:a.status==="active"?"#16A34A":a.status==="login_required"?"#D97706":"#DC2626"}}>{a.status==="active"?"已登录":a.status==="login_required"?"待登录":"已过期"}</span>
+                <div className="sch-acct-actions">
+                  {a.status!=="active"&&a.platform!=="wechat"&&<button className="sch-acct-act login" onClick={()=>schStartLogin(a.id)}>登录</button>}
+                  <button className="sch-acct-act del" onClick={()=>schDeleteAccount(a.id)}><I.Trash/></button>
+                </div>
+              </div>)}
             </div>
 
             <div className="sch-add">
               <div className="sch-add-t">添加发布计划</div>
               <div className="sch-add-btn" onClick={()=>setSchModal(true)}><I.Plus/> 新建计划</div>
-              <div className="sch-add-link">查看历史计划</div>
             </div>
 
-            <div><div className="sch-detail-t">今日详细计划 <span className="sch-detail-ct">0个任务</span></div>
-              <div style={{fontSize:11,color:"var(--t3)",textAlign:"center",padding:20}}>暂无计划</div>
+            <div><div className="sch-detail-t">今日详细计划 <span className="sch-detail-ct">{schTodayTasks.length}个任务</span></div>
+              {schTodayTasks.length===0&&<div style={{fontSize:11,color:"var(--t3)",textAlign:"center",padding:20}}>暂无计划</div>}
+              {schTodayTasks.map(t=><div key={t.id} style={{padding:"8px 0",borderBottom:"1px solid var(--bl)",fontSize:11}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontWeight:600}}>{t.title||"无标题"}</span>
+                  <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:t.status==="success"?"#DCFCE7":t.status==="failed"?"#FEE2E2":t.status==="running"?"#DBEAFE":"#F3F4F6",color:t.status==="success"?"#16A34A":t.status==="failed"?"#DC2626":t.status==="running"?"#2563EB":"var(--t3)"}}>{t.status==="success"?"已发布":t.status==="failed"?"失败":t.status==="running"?"发布中":"待发布"}</span>
+                </div>
+                <div style={{display:"flex",gap:6,marginTop:4,color:"var(--t3)",fontSize:10}}>
+                  <span>{new Date(t.scheduled_at).toTimeString().slice(0,5)}</span>
+                  <span>{t.platform}</span>
+                  {t.status==="pending"&&<span style={{color:"var(--p)",cursor:"pointer"}} onClick={()=>schPublishNow(t.id)}>立即发布</span>}
+                  {t.status==="failed"&&<span style={{color:"var(--r)",cursor:"pointer"}} onClick={()=>schPublishNow(t.id)}>重试</span>}
+                  <span style={{color:"var(--t3)",cursor:"pointer"}} onClick={()=>schDeleteTask(t.id)}>删除</span>
+                </div>
+              </div>)}
             </div>
           </div>
         </div>
@@ -2606,55 +2900,251 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
         {/* Schedule modal */}
         {schModal&&<div className="sch-ov" onClick={()=>setSchModal(false)}><div className="sch-mdl" onClick={e=>e.stopPropagation()}>
           <div className="sch-mdl-main">
-            <div className="sch-mdl-hd"><div className="sch-mdl-t">新建发布计划</div><button className="mdl-x" onClick={()=>setSchModal(false)}><I.X/></button></div>
+            <div className="sch-mdl-hd">
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,var(--p),var(--pl))",display:"flex",alignItems:"center",justifyContent:"center"}}><I.Calendar style={{color:"#fff",width:18,height:18}}/></div>
+                <div><div className="sch-mdl-t">创建发布计划</div><div style={{fontSize:11,color:"var(--t3)",marginTop:1}}>填写内容后AI将智能推荐最佳发布时间</div></div>
+              </div>
+              <button className="mdl-x" onClick={()=>setSchModal(false)}><I.X/></button>
+            </div>
             <div className="sch-mdl-tabs">
-              {["内容库上传","本地上传","标签提醒"].map((t,i)=><button key={i} className={`sch-mdl-tab ${schTab===i?"on":""}`} onClick={()=>setSchTab(i)}>{t}</button>)}
+              {["内容发布","标签提醒"].map((t,i)=><button key={i} className={`sch-mdl-tab ${schTab===i?"on":""}`} onClick={()=>setSchTab(i)}>{t}</button>)}
             </div>
             <div className="sch-mdl-body">
-              {schTab===0&&<><div className="tool-fg"><div className="tool-fg-l">从内容库选择内容</div><select className="tool-sel"><option>从内容库选择内容</option></select><div style={{fontSize:11,color:"var(--t3)",marginTop:4}}>正在加载内容库...</div></div></>}
-
-              <div className="tool-fg"><div className="tool-fg-l">发布平台</div></div>
-              <div className="sch-plats">
-                {["抖","快","红","微"].map((p,i)=><div key={i} className={`sch-plat-btn ${i===0?"on":""}`} style={{color:["#000","#FF6600","#FF2442","#D4A017"][i],fontWeight:700,fontSize:12}}>{p}</div>)}
+              {/* Step 1: 平台 & 账号 */}
+              <div className="sch-section">
+                <div className="sch-section-t"><span className="sch-step-n">1</span> 选择平台与账号</div>
+                <div style={{display:"flex",gap:16,alignItems:"flex-start",flexWrap:"wrap"}}>
+                  <div className="sch-plats">
+                    {[{k:"抖",c:"#000",bg:"#00000010"},{k:"快",c:"#FF6600",bg:"#FF660010"},{k:"红",c:"#FF2442",bg:"#FF244210"},{k:"微",c:"#07C160",bg:"#07C16010"}].map((p,i)=><div key={i} className={`sch-plat-chip ${schPlatBtns[i]?"on":""}`} style={{"--pc":p.c,"--pbg2":p.bg}} onClick={()=>{const n=[...schPlatBtns];n[i]=!n[i];setSchPlatBtns(n);if(!n[i])return;
+                      /* 自动切换内容类型：抖音/快手默认视频，小红书/公众号默认图文 */
+                      if(i===0||i===1)setSchContentType("video");
+                      if(i===2||i===3)setSchContentType("image");
+                    }}><span className="sch-plat-dot" style={{background:p.c}}/>{schPlatLabels[i]}</div>)}
+                  </div>
+                  <select className="sch-sel" value={schSelAccount} onChange={e=>setSchSelAccount(e.target.value)}>
+                    <option value="">选择发布账号</option>
+                    {schAccounts.filter(a=>a.status==="active").map(a=><option key={a.id} value={a.id}>[{{"xiaohongshu":"小红书","douyin":"抖音","kuaishou":"快手","wechat":"公众号"}[a.platform]}] {a.nickname}</option>)}
+                  </select>
+                </div>
               </div>
 
-              {schTab!==2?<div className="sch-content-row">
-                <div className="sch-cover"><I.Image/> 封面(选填)</div>
-                <div className="sch-content-fields">
-                  <input className="tool-inp" placeholder="输入您视频的标题......"/>
-                  <textarea className="tool-inp" rows={3} placeholder="输入您视频的描述或正文......" style={{resize:"vertical"}}/>
+              {schTab!==1?<>
+              {/* Step 2: 内容类型 & 素材上传 */}
+              <div className="sch-section">
+                <div className="sch-section-t"><span className="sch-step-n">2</span> 上传素材 <span className="sch-required">必填</span></div>
+                <div className="sch-type-toggle">
+                  <div className={`sch-type-btn ${schContentType==="image"?"on":""}`} onClick={()=>{setSchContentType("image");setSchFiles([]);}}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                    <span>图文</span>
+                    <span className="sch-type-desc">图片+文字笔记</span>
+                  </div>
+                  <div className={`sch-type-btn ${schContentType==="video"?"on":""}`} onClick={()=>{setSchContentType("video");setSchFiles([]);}}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+                    <span>视频</span>
+                    <span className="sch-type-desc">短视频发布</span>
+                  </div>
                 </div>
-              </div>:<>
-                <div className="tool-fg"><input className="tool-inp" placeholder="输入提醒标题......"/></div>
-                <div className="tool-fg"><textarea className="tool-inp" rows={3} placeholder="输入提醒详细内容（可选）......" style={{resize:"vertical"}}/></div>
+                <div className="sch-media-zone">
+                  {schContentType==="image"?<>
+                    <div className="sch-media-add" onClick={()=>schFileRef.current?.click()}>
+                      <I.Plus style={{width:20,height:20}}/>
+                      <span>添加图片</span>
+                      <span style={{fontSize:9,color:"var(--t3)"}}>jpg/png/webp</span>
+                      <input ref={schFileRef} type="file" multiple accept="image/*" style={{display:"none"}} onChange={schHandleFiles}/>
+                    </div>
+                    {schFiles.map((f,i)=><div key={i} className="sch-media-item">
+                      <img src={f.preview} alt=""/>
+                      <div className="sch-media-del" onClick={()=>setSchFiles(schFiles.filter((_,j)=>j!==i))}><I.X style={{width:10,height:10}}/></div>
+                      {i===0&&<div className="sch-media-cover">封面</div>}
+                    </div>)}
+                  </>:<>
+                    {schFiles.length===0?<div className="sch-video-add" onClick={()=>schFileRef.current?.click()}>
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{opacity:.4}}><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+                      <span style={{fontWeight:600}}>点击上传视频</span>
+                      <span style={{fontSize:10,color:"var(--t3)"}}>支持 mp4/mov/avi，最大 4GB</span>
+                      <input ref={schFileRef} type="file" accept="video/*" style={{display:"none"}} onChange={schHandleFiles}/>
+                    </div>:<div className="sch-video-preview">
+                      <div className="sch-video-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
+                      <div className="sch-video-info">
+                        <div style={{fontWeight:600,fontSize:12}}>{schFiles[0].name}</div>
+                        <div style={{fontSize:10,color:"var(--t3)",marginTop:2}}>视频已上传</div>
+                      </div>
+                      <div className="sch-media-del" style={{opacity:1,position:"static",background:"var(--s2)",color:"var(--t3)"}} onClick={()=>setSchFiles([])}><I.X style={{width:10,height:10}}/></div>
+                    </div>}
+                  </>}
+                </div>
+                {schFiles.length===0&&<div className="sch-media-hint">{schContentType==="video"?"请上传一个视频文件":"请至少上传一张图片作为发布素材"}</div>}
+              </div>
+
+              {/* Step 3: 内容 */}
+              <div className="sch-section">
+                <div className="sch-section-t"><span className="sch-step-n">3</span> 编辑内容</div>
+                <input className="sch-inp-title" placeholder="输入吸引人的标题..." value={schTitle} onChange={e=>setSchTitle(e.target.value)} maxLength={20}/>
+                <div style={{textAlign:"right",fontSize:10,color:schTitle.length>18?"var(--r)":"var(--t3)",marginTop:2}}>{schTitle.length}/20</div>
+                <textarea className="sch-inp-content" rows={4} placeholder="输入正文内容，好的内容是获得流量的关键..." value={schDesc} onChange={e=>setSchDesc(e.target.value)} maxLength={1000}/>
+                <div style={{textAlign:"right",fontSize:10,color:schDesc.length>900?"var(--r)":"var(--t3)",marginTop:2}}>{schDesc.length}/1000</div>
+              </div>
+              </>:<>
+                <div className="sch-section">
+                  <div className="sch-section-t"><span className="sch-step-n">2</span> 提醒内容</div>
+                  <input className="sch-inp-title" placeholder="输入提醒标题..." value={schTitle} onChange={e=>setSchTitle(e.target.value)}/>
+                  <textarea className="sch-inp-content" rows={3} placeholder="输入提醒详细内容（可选）..." style={{marginTop:10}} value={schDesc} onChange={e=>setSchDesc(e.target.value)}/>
+                </div>
               </>}
 
-              <div className="sch-plan-bar">
-                <div className="sch-plan-bar-t">计划与分类</div>
-                <div className="sch-plan-bar-row">
-                  <span style={{display:"flex",alignItems:"center",gap:4}}><I.Calendar/> 2026/03/09</span>
-                  <span>—</span>
-                  <span style={{display:"flex",alignItems:"center",gap:4}}><I.Clock/> 18:16</span>
-                  <div className="sch-colors" style={{marginLeft:"auto"}}>
-                    <div style={{fontSize:10,color:"var(--t3)",marginRight:4,alignSelf:"center"}}>选择任务颜色</div>
-                    {["#3B82F6","#10B981","#7C3AED","#F97316","#F43F5E"].map((c,i)=><div key={i} className={`sch-color ${schColor===i?"on":""}`} style={{background:c}} onClick={()=>setSchColor(i)}/>)}
+              {/* Step 4: 时间 & 分类 */}
+              <div className="sch-section">
+                <div className="sch-section-t"><span className="sch-step-n">{schTab===1?"3":"4"}</span> 发布时间</div>
+                <div className="sch-time-grid">
+                  <div className="sch-time-item">
+                    <div className="sch-time-lbl"><I.Calendar style={{width:13,height:13}}/> 日期</div>
+                    <input type="date" className="sch-time-inp" value={schDate} onChange={e=>setSchDate(e.target.value)}/>
+                  </div>
+                  <div className="sch-time-item">
+                    <div className="sch-time-lbl"><I.Clock style={{width:13,height:13}}/> 时间</div>
+                    <input type="time" className="sch-time-inp" value={schTime} onChange={e=>setSchTime(e.target.value)}/>
+                  </div>
+                  <div className="sch-time-item" style={{flex:"0 0 auto"}}>
+                    <div className="sch-time-lbl">分类标签</div>
+                    <div className="sch-colors">
+                      {[{c:"#3B82F6",l:"带货"},{c:"#10B981",l:"教程"},{c:"#7C3AED",l:"故事"},{c:"#F97316",l:"日常"},{c:"#F43F5E",l:"热点"}].map((item,i)=><div key={i} className={`sch-color-tag ${schColor===i?"on":""}`} style={{"--cc":item.c}} onClick={()=>setSchColor(i)}>{item.l}</div>)}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
             <div className="sch-mdl-foot">
+              <div className="sch-foot-info">{schFiles.length>0&&<span>{schFiles.length} 张素材已上传</span>}</div>
               <button className="sch-f-btn sch-f-cancel" onClick={()=>setSchModal(false)}>取消</button>
-              <button className="sch-f-btn sch-f-confirm">{schTab===2?"确认提醒":"确认发布"}</button>
+              <button className="sch-f-btn sch-f-confirm" onClick={schCreateTask} disabled={schPublishing}>{schPublishing?"创建中...":schTab===1?"确认提醒":"确认发布"}</button>
             </div>
           </div>
 
           {/* AI time helper sidebar */}
           <div className="sch-ai">
-            <div className="sch-ai-t"><I.Sparkle/> AI时间规划助手</div>
-            <button className="sch-ai-btn"><I.Clock/> 点击获取AI推荐发布时间</button>
-            <div className="sch-ai-lbl">推荐时间段</div>
+            <div className="sch-ai-head">
+              <div className="sch-ai-icon"><I.Sparkle style={{width:16,height:16}}/></div>
+              <div><div className="sch-ai-t">AI 发布助手</div><div style={{fontSize:10,color:"var(--t3)"}}>基于内容智能推荐</div></div>
+            </div>
+            <button className="sch-ai-btn" onClick={schGetAiTime} disabled={schAiLoading}>
+              {schAiLoading?<><span className="sch-ai-spin"/>分析中...</>:<><I.Sparkle style={{width:14,height:14}}/> 智能分析推荐时间</>}
+            </button>
+            {(!schTitle.trim()&&!schDesc.trim())&&<div className="sch-ai-empty"><I.Sparkle style={{width:20,height:20,opacity:.3}}/><span>请先填写标题和内容</span><span style={{fontSize:10}}>AI将根据您的内容分析最佳发布时间</span></div>}
+            {schAiAnalysis&&<div className="sch-ai-analysis">
+              <div className="sch-ai-analysis-row"><span className="sch-ai-tag">内容类型</span>{schAiAnalysis.type}</div>
+              <div className="sch-ai-analysis-row"><span className="sch-ai-tag">目标受众</span>{schAiAnalysis.audience}</div>
+            </div>}
+            {schAiTimes.length>0&&<div className="sch-ai-lbl">推荐发布时间</div>}
+            {schAiTimes.map((r,i)=><div key={i} className="sch-ai-card" onClick={()=>{setSchTime(r.time.trim());}}>
+              <div className="sch-ai-card-top">
+                <div className="sch-ai-card-time">{r.time}</div>
+                <div className="sch-ai-card-score">{r.score}<span>/10</span></div>
+              </div>
+              {r.range&&<div className="sch-ai-card-range">{r.range}</div>}
+              <div className="sch-ai-card-reason">{r.reason}</div>
+              {r.tip&&<div className="sch-ai-card-tip"><I.Sparkle style={{width:10,height:10,flexShrink:0}}/> {r.tip}</div>}
+              <div className="sch-ai-card-use">点击使用此时间</div>
+            </div>)}
           </div>
         </div></div>}
+
+        {/* QR Login modal */}
+        {schQrModal&&<div className="sch-ov" style={{zIndex:150}} onClick={()=>{setSchQrModal(null);fetch(`/schedule-api/accounts/${schQrModal}/cancel-login`,{method:'POST'});}}>
+          <div className="sch-nice-modal" style={{width:440}} onClick={e=>e.stopPropagation()}>
+            <div className="sch-nm-hd">
+              <div className="sch-nm-t">扫码登录</div>
+              <button className="mdl-x" onClick={()=>{setSchQrModal(null);fetch(`/schedule-api/accounts/${schQrModal}/cancel-login`,{method:'POST'});}}><I.X/></button>
+            </div>
+            <div className="sch-nm-body">
+              <div className="sch-qr-wrap">
+                {schQrStatus==="loading"&&<div className="sch-qr-loading">正在启动浏览器，请稍候...</div>}
+                {schQrStatus==="qr_ready"&&<>
+                  <div className="sch-qr-sub">请使用手机 App 扫描屏幕上的二维码完成登录</div>
+                  {schQrImg&&<img src={schQrImg} className="sch-qr-img"/>}
+                </>}
+                {schQrStatus==="done"&&<div className="sch-qr-success">
+                  <div className="sch-qr-success-icon"><I.Check/></div>
+                  <div className="sch-qr-success-t">登录成功</div>
+                </div>}
+                {schQrStatus==="error"&&<div className="sch-qr-error">
+                  <div style={{fontSize:24,marginBottom:8}}>!</div>
+                  登录出错，请关闭后重试
+                </div>}
+              </div>
+            </div>
+          </div>
+        </div>}
+
+        {/* Add Account modal */}
+        {schAcctModal&&<div className="sch-ov" style={{zIndex:140}} onClick={()=>setSchAcctModal(false)}>
+          <div className="sch-nice-modal" style={{width:480}} onClick={e=>e.stopPropagation()}>
+            <div className="sch-nm-hd">
+              <div className="sch-nm-t">添加平台账号</div>
+              <button className="mdl-x" onClick={()=>setSchAcctModal(false)}><I.X/></button>
+            </div>
+            <div className="sch-nm-body">
+              <div style={{fontSize:12,color:"var(--t3)",marginBottom:16}}>选择要绑定的社交平台</div>
+              <div className="sch-nm-plat-grid">
+                {[
+                  {k:"xiaohongshu",nm:"小红书",desc:"图文 · 短视频",bg:"#FF2442",icon:"红"},
+                  {k:"douyin",nm:"抖音",desc:"短视频 · 直播",bg:"#111",icon:"抖"},
+                  {k:"kuaishou",nm:"快手",desc:"短视频 · 直播",bg:"#FF6600",icon:"快"},
+                  {k:"wechat",nm:"微信公众号",desc:"图文 · 长文章",bg:"#07C160",icon:"微"},
+                ].map(p=><div key={p.k} className={`sch-nm-plat-card ${schNewAcctPlat===p.k?"on":""}`} onClick={()=>setSchNewAcctPlat(p.k)}>
+                  <div className="sch-nm-plat-icon" style={{background:p.bg}}>{p.icon}</div>
+                  <div className="sch-nm-plat-name">{p.nm}</div>
+                  <div className="sch-nm-plat-desc">{p.desc}</div>
+                </div>)}
+              </div>
+              <div style={{fontSize:12,fontWeight:600,marginBottom:8,color:"var(--t2)"}}>账号昵称</div>
+              <input className="sch-nm-input" placeholder="输入昵称便于识别，如「工作号」「品牌号」" value={schNewAcctName} onChange={e=>setSchNewAcctName(e.target.value)}/>
+              <div className="sch-nm-footer">
+                <button className="sch-nm-btn sec" onClick={()=>setSchAcctModal(false)}>取消</button>
+                <button className="sch-nm-btn pri" onClick={schAddAccount}>添加账号</button>
+              </div>
+            </div>
+          </div>
+        </div>}
+
+        {/* Task Detail modal */}
+        {schLogModal&&<div className="sch-ov" style={{zIndex:130}} onClick={()=>setSchLogModal(null)}>
+          <div className="sch-nice-modal" style={{width:500}} onClick={e=>e.stopPropagation()}>
+            <div className="sch-nm-hd">
+              <div className="sch-nm-t">任务详情</div>
+              <button className="mdl-x" onClick={()=>setSchLogModal(null)}><I.X/></button>
+            </div>
+            <div className="sch-nm-body">
+              {(()=>{const t=schTasks.find(x=>x.id===schLogModal);if(!t)return<div style={{textAlign:"center",padding:20,color:"var(--t3)"}}>任务未找到</div>;
+              const platColors={"xiaohongshu":"#FF2442","douyin":"#111","kuaishou":"#FF6600","wechat":"#07C160"};
+              const platNames={"xiaohongshu":"小红书","douyin":"抖音","kuaishou":"快手","wechat":"微信公众号"};
+              const platIcons={"xiaohongshu":"红","douyin":"抖","kuaishou":"快","wechat":"微"};
+              const statusCfg={success:{bg:"#DCFCE7",color:"#16A34A",text:"已发布"},failed:{bg:"#FEE2E2",color:"#DC2626",text:"发布失败"},running:{bg:"#DBEAFE",color:"#2563EB",text:"发布中"},pending:{bg:"#F3F4F6",color:"#6B7280",text:"待发布"},cancelled:{bg:"#F3F4F6",color:"#9CA3AF",text:"已取消"}};
+              const sc=statusCfg[t.status]||statusCfg.pending;
+              return<>
+                <div className="sch-td-header">
+                  <div className="sch-td-plat" style={{background:platColors[t.platform]||"#999"}}>{platIcons[t.platform]||"?"}</div>
+                  <div className="sch-td-info">
+                    <div className="sch-td-title">{t.title||"无标题"}</div>
+                    <div className="sch-td-meta">
+                      <span>{platNames[t.platform]||t.platform}</span>
+                      <span>{new Date(t.scheduled_at).toLocaleString()}</span>
+                    </div>
+                  </div>
+                  <div className="sch-td-status" style={{background:sc.bg,color:sc.color}}>{sc.text}</div>
+                </div>
+                {t.content&&<div style={{fontSize:12,color:"var(--t2)",lineHeight:1.6,padding:"12px 14px",background:"var(--s2)",borderRadius:10,marginBottom:14}}>{t.content}</div>}
+                {t.error_log&&<div className="sch-td-error">{t.error_log}</div>}
+                {t.publish_url&&<div className="sch-td-link"><a href={t.publish_url} target="_blank" rel="noreferrer">查看已发布内容 →</a></div>}
+                <div className="sch-td-actions">
+                  {t.status==="pending"&&<button className="sch-nm-btn pri" style={{fontSize:12,padding:"8px 20px"}} onClick={()=>{schPublishNow(t.id);setSchLogModal(null);}}>立即发布</button>}
+                  {t.status==="failed"&&<button className="sch-nm-btn pri" style={{fontSize:12,padding:"8px 20px"}} onClick={()=>{schPublishNow(t.id);setSchLogModal(null);}}>重新发布</button>}
+                  <button className="sch-nm-btn sec" style={{fontSize:12,padding:"8px 20px",color:"var(--r)"}} onClick={()=>{schDeleteTask(t.id);setSchLogModal(null);}}>删除任务</button>
+                </div>
+              </>;})()}
+            </div>
+          </div>
+        </div>}
         </>}
         {pg==="adkol"&&<div className="kol-wrap">
           <div className="kol-search"><input placeholder="搜索达人昵称或ID..."/><button className="kol-search-btn"><I.Search/> 搜索</button></div>
