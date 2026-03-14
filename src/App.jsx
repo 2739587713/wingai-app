@@ -137,6 +137,9 @@ export default function App(){
   const [prod,setProd]=useState("面膜");
   const [cat,setCat]=useState("美妆护肤");
   const [dur,setDur]=useState("30秒");
+  const [prodImages,setProdImages]=useState([]); // 用户上传的产品实拍图(data URI)
+  const [prodDesc,setProdDesc]=useState(""); // 用户填写的产品描述/卖点
+  const [charRefImg,setCharRefImg]=useState(null); // AI生成的主角参考图(URL)
   const [dataOn,setDataOn]=useState(true);
   const [adopted,setAdopted]=useState(null);
   const [showSc,setShowSc]=useState(false);
@@ -248,7 +251,8 @@ export default function App(){
   const [schFiles,setSchFiles]=useState([]);
   const [schContentType,setSchContentType]=useState("image"); // image/video/article
   const [schAuthor,setSchAuthor]=useState(""); // 公众号文章作者
-  const [schWxImgMode,setSchWxImgMode]=useState("cover"); // cover=仅封面 / inline=插入正文
+  const [schImgPos,setSchImgPos]=useState("end"); // start=图片在正文前 / end=图片在正文后
+  const [schAutoPublish,setSchAutoPublish]=useState(true); // true=AI自动发布 false=仅记录
   const [schPlatBtns,setSchPlatBtns]=useState([false,false,false,false]); // 抖快红微
   const [schPublishing,setSchPublishing]=useState(false);
   const [schQrModal,setSchQrModal]=useState(null); // account id or null
@@ -281,7 +285,7 @@ export default function App(){
   // 抖音/快手视频不需要标题，只需文案；小红书/公众号始终需要标题
   const schNeedTitle=schPlatBtns[2]||schPlatBtns[3]; // 小红书 or 公众号
   const schIsWxArticle=schPlatBtns[3]&&schContentType==="article"; // 微信公众号文章模式
-  const schDescPlaceholder=schIsWxArticle?"输入文章正文，支持多段落排版，图片将根据设置插入正文或仅作为封面...":!schPlatBtns[2]&&!schPlatBtns[3]&&(schPlatBtns[0]||schPlatBtns[1])?"输入视频文案，可添加 #话题标签 @好友...":"输入正文内容，好的内容是获得流量的关键...";
+  const schDescPlaceholder=schIsWxArticle?"输入文章正文，支持多段落排版...":!schPlatBtns[2]&&!schPlatBtns[3]&&(schPlatBtns[0]||schPlatBtns[1])?"输入视频文案，可添加 #话题标签 @好友...":"输入正文内容，好的内容是获得流量的关键...";
   const schDescMax=schIsWxArticle?20000:schPlatBtns[0]&&!schPlatBtns[2]&&!schPlatBtns[3]?2200:1000;
   const schCreateTask=async()=>{
     const selPlats=schPlatBtns.map((on,i)=>on?schPlatMap[i]:null).filter(Boolean);
@@ -297,16 +301,15 @@ export default function App(){
     setSchPublishing(true);
     try{
       const mediaPaths=schFiles.map(f=>f.serverPath).filter(Boolean);
-      // For WeChat article mode: determine cover_path based on image mode
+      // For WeChat article mode: separate cover and inline images by _role
       let coverPath="";
       let taskMediaPaths=mediaPaths;
-      if(schIsWxArticle&&mediaPaths.length>0){
-        coverPath=mediaPaths[0]; // First image is always cover
-        if(schWxImgMode==="cover"){
-          // "仅封面" mode: images are only used as cover, not inserted in body
-          taskMediaPaths=mediaPaths; // pass all, backend will use first as cover only
-        }
-        // "inline" mode: backend will use first as cover + rest as inline images
+      if(schIsWxArticle){
+        const coverFile=schFiles.find(f=>f._role==="cover");
+        const inlineFiles=schFiles.filter(f=>f._role==="inline");
+        coverPath=coverFile?.serverPath||"";
+        // media_paths = cover (if any) + inline images
+        taskMediaPaths=[coverPath,...inlineFiles.map(f=>f.serverPath)].filter(Boolean);
       }
       for(const aid of schSelAccounts){
         const acct=schAccounts.find(a=>a.id===Number(aid));
@@ -316,16 +319,17 @@ export default function App(){
           account_id:acct.id,platform:acct.platform,content_type:schContentType,title:schTitle,content:schDesc,
           scheduled_at:dt,color:["#3B82F6","#10B981","#7C3AED","#F97316","#F43F5E","#6B7280"][schColor],
           category:["sell","edu","story","daily","hot","other"][schColor],
-          media_paths:taskMediaPaths,cover_path:coverPath,tags:[],
+          media_paths:taskMediaPaths,cover_path:coverPath,img_position:schImgPos,auto_publish:schAutoPublish,tags:[],
         })});
       }
-      setSchModal(false);setSchTitle("");setSchDesc("");setSchFiles([]);setSchContentType("image");setSchSelAccounts([]);setSchAuthor("");setSchWxImgMode("cover");
+      setSchModal(false);setSchTitle("");setSchDesc("");setSchFiles([]);setSchContentType("image");setSchSelAccounts([]);setSchAuthor("");setSchImgPos("end");setSchAutoPublish(true);
       schFetchAll();
     }catch(e){alert("创建失败: "+e.message)}
     setSchPublishing(false);
   };
   const schDeleteTask=async(id)=>{await fetch(`/schedule-api/tasks/${id}`,{method:'DELETE'});schFetchAll();};
   const schPublishNow=async(id)=>{await fetch(`/schedule-api/tasks/${id}/publish-now`,{method:'POST'});schFetchAll();};
+  const schSetStatus=async(id,status)=>{await fetch(`/schedule-api/tasks/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});schFetchAll();};
   const schUploadFile=async(file)=>{
     const fd=new FormData();fd.append('file',file);
     const r=await fetch('/schedule-api/tasks/upload-media',{method:'POST',body:fd});
@@ -365,6 +369,7 @@ export default function App(){
     setSchNewAcctName("");setSchAcctModal(false);schFetchAll();
   };
   const schDeleteAccount=async(id)=>{await fetch(`/schedule-api/accounts/${id}`,{method:'DELETE'});schFetchAll();};
+  const [schExpandedDays,setSchExpandedDays]=useState({});
   const [schAiLoading,setSchAiLoading]=useState(false);
   const [schAiAnalysis,setSchAiAnalysis]=useState(null);
   const schGetAiTime=async()=>{
@@ -622,20 +627,50 @@ export default function App(){
   // Build visual anchor prefix from adopted script's visual_anchor field
   const getAnchorPrefix=()=>{
     const a=adopted?.visual_anchor;
-    if(!a)return"STRICT RULES: No text, no words, no letters, no labels, no logos, no watermarks anywhere in the image. ";
-    const parts=["STRICT RULES: No text, no words, no letters, no labels, no logos, no watermarks anywhere in the image. This is one frame from a cohesive short video ad."];
-    if(a.character&&a.character!=="none")parts.push(`The same person appears in every shot: ${a.character}.`);
-    if(a.product)parts.push(`The product always looks exactly like this: ${a.product}.`);
-    if(a.setting)parts.push(`Setting: ${a.setting}.`);
-    if(a.palette)parts.push(`Visual style: ${a.palette}.`);
-    parts.push("Douyin/TikTok viral product video aesthetic, iPhone-shot feel, lifestyle commercial, high engagement visual hook.");
-    return parts.join(" ")+"\n\nShot-specific direction: ";
+    const noText="ABSOLUTE RULE: No text, no words, no letters, no labels, no logos, no watermarks, no brand names anywhere in the image. Product packaging must be completely plain with no writing.";
+    if(!a)return noText+" ";
+    const parts=[noText+" This is one frame from a cohesive Douyin/TikTok short video ad. All frames belong to the same video."];
+    if(a.character&&a.character!=="none")parts.push(`SAME PERSON in every shot (do not change any detail): ${a.character}.`);
+    if(a.product)parts.push(`SAME PRODUCT in every shot (exact same appearance): ${a.product}.`);
+    if(a.setting)parts.push(`SAME LOCATION: ${a.setting}.`);
+    if(a.palette)parts.push(`CONSISTENT STYLE: ${a.palette}.`);
+    parts.push("Aesthetic: Douyin viral product video, real iPhone-shot feel, lifestyle vlog, NOT stock photography, NOT studio ad.");
+    return parts.join(" ")+"\n\nThis specific shot: ";
   };
   const generateSbImages=async()=>{
     if(sbShots.length===0)return;
-    setSbImgBusy(true);setSbGenStatus("准备生成分镜图...");
+    setSbImgBusy(true);
+
+    // Step 0: 如果有产品实拍图，用Gemini分析外观描述
+    let prodImgDesc="";
+    if(prodImages.length>0){
+      setSbGenStatus("分析产品参考图...");
+      try{
+        const analysisPrompt="Look at this product image and describe the product's exact physical appearance in English for image generation consistency. Include: shape, color, material, size, packaging style. Be extremely specific. Do NOT include any text/labels you see — describe as if no text exists. 30-50 words.";
+        const imgContent=[{type:"image_url",image_url:{url:prodImages[0]}},...(prodImages.length>1?[{type:"image_url",image_url:{url:prodImages[1]}}]:[]),{type:"text",text:analysisPrompt}];
+        const resp=await fetch("/blt-proxy/v1/chat/completions",{method:"POST",headers:API_HDRS,body:JSON.stringify({model:"gemini-2.5-flash",messages:[{role:"user",content:imgContent}],max_tokens:200,temperature:0.3})});
+        if(resp.ok){const data=await resp.json();prodImgDesc=data.choices?.[0]?.message?.content||"";}
+        console.log("[SB] 产品外观描述:",prodImgDesc);
+      }catch(e){console.warn("[SB] 产品图分析失败:",e.message);}
+    }
+
+    // Step 1: 生成主角参考图(保证全片人物一致)
+    const anchor=adopted?.visual_anchor;
+    let charRef=charRefImg;
+    if(!charRef&&anchor?.character&&anchor.character!=="none"){
+      setSbGenStatus("生成主角形象参考图...");
+      try{
+        const charPrompt=`Character reference photo for short video. ${anchor.character}. In ${anchor.setting||"a clean modern room"}. ${anchor.palette||"Natural soft lighting, iPhone feel"}. Medium shot, 3/4 angle, natural smile. No text, no words, no labels, no logos anywhere.`;
+        charRef=await genOneImage(charPrompt);
+        setCharRefImg(charRef);
+        console.log("[SB] 主角参考图OK");
+      }catch(e){console.warn("[SB] 主角参考图失败:",e.message);}
+    }
+
+    setSbGenStatus("开始生成分镜图...");
     const anchorPrefix=getAnchorPrefix();
-    if(anchorPrefix)console.log("[SB] Visual anchor:",anchorPrefix);
+    const prodOverride=prodImgDesc?`The product looks exactly like this (from real photo): ${prodImgDesc}. `:"";
+
     const sem={count:0,max:3,queue:[]};
     const withSem=async(fn)=>{while(sem.count>=sem.max)await new Promise(r=>sem.queue.push(r));sem.count++;try{return await fn();}finally{sem.count--;if(sem.queue.length>0)sem.queue.shift()();}};
     let done=0;
@@ -644,19 +679,13 @@ export default function App(){
         setSbShots(prev=>{const n=[...prev];n[i]={...n[i],status:"generating"};return n;});
         let shotPrompt=sbShots[i].imgPrompt;
         if(!shotPrompt){
-          const raw=await callLLM({model:"gemini-2.5-flash",prompt:`You are a Douyin/TikTok viral video visual director. Convert this Chinese scene description into an English image generation prompt.\n\nScene: ${sbShots[i].scene}\nProduct: ${prod} (${cat})\nShot type: ${sbShots[i].tag}\nCamera: ${sbShots[i].camera}\nLighting: ${sbShots[i].lighting}\nMood: ${sbShots[i].mood}\n\nCRITICAL RULES:\n1. NEVER include any text, words, letters, labels, logos, brand names, or watermarks in the image\n2. Style: Douyin/TikTok viral product video, iPhone-shot aesthetic, lifestyle commercial\n3. If the scene involves a person, describe them from behind, side profile, or show only hands/body parts — avoid detailed faces\n4. Focus on: framing (close-up/medium/wide), camera angle, product placement, lighting mood, lens parameters\n5. Make it look like a real viral short video frame, not a stock photo\n6. 30-50 English words\n\nOutput ONLY the prompt text, nothing else.`,temperature:0.7,maxTokens:200});
+          const raw=await callLLM({model:"gemini-2.5-flash",prompt:`You are a Douyin/TikTok viral video visual director. Convert this scene into an English image prompt.\n\nScene: ${sbShots[i].scene}\nProduct: ${prod} (${cat})\nShot type: ${sbShots[i].tag}\nCamera: ${sbShots[i].camera}\nMood: ${sbShots[i].mood}\n${prodImgDesc?"Product real appearance: "+prodImgDesc:""}\n\nRULES:\n1. NO text/words/letters/labels/logos/watermarks\n2. Douyin viral style, real iPhone-shot feel, lifestyle vlog\n3. Person: describe pose/action only, keep consistent with anchor\n4. Must look like screenshot from real viral short video\n5. 30-50 words, end with "no text, no labels."\n\nOutput ONLY the prompt.`,temperature:0.7,maxTokens:200});
           shotPrompt=raw.trim();
         }
-        // Combine anchor + shot-specific prompt for visual consistency
-        const prompt=anchorPrefix+shotPrompt;
-        // Generate 2 versions for user to pick
+        const prompt=prodOverride+anchorPrefix+shotPrompt;
         const versions=[];
-        for(let v=0;v<2;v++){
-          try{
-            const url=await genOneImage(prompt+(v>0?", alternative angle, slightly different composition":""));
-            versions.push(url);
-          }catch(e){console.error(`[SB] shot ${i+1} v${v+1} failed:`,e.message);}
-        }
+        try{const url=await genOneImage(prompt);versions.push(url);}catch(e){console.error(`[SB] shot ${i+1} v1:`,e.message);}
+        try{const url=await genOneImage(prompt+" Slightly different angle, same person same product same setting.");versions.push(url);}catch(e){console.error(`[SB] shot ${i+1} v2:`,e.message);}
         const best=versions[0]||null;
         setSbShots(prev=>{const n=[...prev];n[i]={...n[i],imageUrl:best,imageVersions:versions,imgPrompt:shotPrompt,status:best?"generated":"pending"};return n;});
         done++;
@@ -1448,6 +1477,28 @@ ${styleList}
     const riskRules="【平台违禁词规避】\n禁止极限词：最好用、第一、唯一、全网最、顶级、No.1、绝对、永久\n禁止医疗词：治疗、消炎、临床证明、药用\n禁止绝对承诺：保证有效、彻底解决\n必须替换：敏感肌→敏敏肌 | 美白→提亮肤色/亮肤 | 祛痘→改善痘肌 | 去黑头→清洁毛孔 | 减肥→塑形 | 抗老→改善细纹 | 无添加→配方简净 | 修复→改善调理 | 医美级→院线同款\nrisk字段：擦边表达设为true";
     const ipCtx=getIpContext();
 
+    // ═══ 产品信息增强：如果有产品图/描述，先让AI深度理解产品 ═══
+    let prodFullDesc=prodDesc||"";
+    try{
+      // 如果上传了产品图，用Gemini视觉分析产品
+      if(prodImages.length>0&&!prodFullDesc){
+        setAiGenStep("AI正在分析产品图片，识别产品特征...");
+        const imgContent=[...prodImages.map(img=>({type:"image_url",image_url:{url:img}})),{type:"text",text:`请仔细观察这个产品的照片，详细描述：
+1. 这是什么产品？（具体品类，不要猜测功能）
+2. 外观特征：颜色、材质、形状、大小、设计风格
+3. 从外观能判断的使用场景
+4. 产品的视觉亮点（什么最吸引眼球）
+
+重要：只描述你能从图片中看到的，不要编造功能或卖点。如果看不出具体功能，就说"需要用户补充"。
+用中文回答，100字以内。`}];
+        const resp=await fetch("/blt-proxy/v1/chat/completions",{method:"POST",headers:API_HDRS,body:JSON.stringify({model:"gemini-2.5-flash",messages:[{role:"user",content:imgContent}],max_tokens:300,temperature:0.3})});
+        if(resp.ok){const data=await resp.json();prodFullDesc=data.choices?.[0]?.message?.content||"";}
+        console.log("[AI] 产品图分析:",prodFullDesc);
+      }
+      // 合并用户手写描述 + AI图片分析
+      if(prodDesc&&prodFullDesc!==prodDesc)prodFullDesc=prodDesc+"\n\n[AI图片分析补充] "+prodFullDesc;
+    }catch(e){console.warn("产品分析失败:",e.message);}
+
     // ═══ 三步生成：千问搜索爆款 → 设计结构大纲 → 并行展开脚本 ═══
     try{
       // ═══ 第一步：千问联网搜索同品类爆款短视频，提炼爆款模式 ═══
@@ -1530,7 +1581,7 @@ ${styleList}
 ${trendRaw}
 
 ---
-
+${prodFullDesc?`\n【⚠️ 产品真实信息 — 必须严格遵守，禁止编造】\n${prodFullDesc}\n\n⚠️ 脚本中所有关于产品功能、材质、外观的描述必须与上面的真实信息一致。不要发明产品没有的功能！如果产品信息不足，脚本侧重外观颜值/使用场景/生活方式，不要编造具体功能参数。\n`:""}
 基于以上拆解，为「${prod}」设计4个完全不同的短视频脚本大纲。
 时长：${dur}
 ${tmplInfo?`\n参考风格档案：\n${tmplInfo}`:""}
@@ -1563,7 +1614,7 @@ JSON输出：
       const expandOne=(outline)=>`将以下脚本大纲展开为一条能在抖音拿到百万播放的完整分镜脚本。你不是在写说明书，你是在导一部30秒短片。
 
 产品：${prod}（${cat}）| 时长：${dur}
-
+${prodFullDesc?`\n【⚠️ 产品真实信息 — 铁律：只能用以下信息，禁止编造任何产品没有的功能/参数/效果】\n${prodFullDesc}\n`:""}
 【爆款分析背景——你的弹药库】
 ${trendRaw.slice(0,2000)}
 
@@ -1614,17 +1665,19 @@ ${riskRules}
 
 ══════ 视觉一致性锚点（visual_anchor字段）—— 最重要！══════
 这是保证整个视频视觉统一的关键。你必须先设计一个贯穿所有镜头的「视觉身份」，包含：
-- character：固定的人物外观描述（发型、发色、服装、配饰），如果脚本不需要人物则写"none"
-- setting：固定的主场景（所有镜头共享同一个空间，只是景别和角度变化），如 "modern minimalist kitchen with light wood cabinets, white marble countertop"
-- product：产品的固定外观描述（材质、颜色、形状、大小），要足够具体以保证每张图中的产品看起来一样
-- palette：统一的色调和摄影风格（色温、光线方向、镜头风格），如 "warm natural daylight from left, soft golden tones, Canon 50mm f/1.4, lifestyle commercial photography"
-所有字段必须是英文。这个锚点会被注入到每一张图的生成提示词中，确保视觉一致性。
+- character：固定的主角外观描述（性别、年龄、发型、发色、服装、配饰），必须足够具体让AI每次画出同一个人。示例："25-year-old Asian woman with long straight black hair, wearing a cream oversized knit sweater, small gold stud earrings, natural minimal makeup"。如果脚本不需要人物则写"none"
+- setting：固定的主场景（所有镜头共享同一个空间，只是景别和角度变化），如 "modern minimalist bathroom vanity, white marble countertop, round LED mirror, small green succulent plant, warm morning light from right window"
+- product：产品的固定外观描述（材质、颜色、形状、大小、包装特征），要极其具体。示例："white frosted glass jar with silver metal lid, 50ml round shape, clean minimalist design with no label no text no logo"。⚠️ 必须写明 "no label no text no logo"
+- palette：统一的色调和摄影风格，如 "warm soft daylight from right, golden hour tones, slight film grain, iPhone 15 Pro Max front camera feel, shallow depth of field, Douyin lifestyle vlog aesthetic"
+⚠️ 所有字段必须是英文。⚠️ product字段必须包含"no text no label no logo"以避免AI生成乱码文字。
 
 ══════ AI生图提示词（image_prompt字段）══════
-纯英文，40-80词。每个镜头的image_prompt只描述该镜头的【差异部分】（景别、构图、动作、特殊光效），不要重复visual_anchor中已有的人物/场景/色调信息。
-生成图片时系统会自动把 visual_anchor + image_prompt 拼接在一起，所以：
-- image_prompt里不要再写人物外观、服装、场景环境、整体色调（这些已在anchor中）
-- 只写：这个镜头特有的构图、景别（close-up/medium/wide）、动作/姿势、产品摆放方式、特殊光效、情绪氛围词
+纯英文，40-80词。这是每个镜头的【差异描述】，系统会自动把 visual_anchor + image_prompt 拼在一起。
+核心规则：
+- 绝对不要在image_prompt中出现任何文字/标签/logo相关的描述！加上"no text, no words, no labels"
+- 不要重复visual_anchor中已有的人物外观、服装、场景环境、整体色调
+- 只写：这个镜头特有的构图、景别（extreme close-up/close-up/medium/wide）、动作/姿势、产品摆放方式、特殊光效
+- 风格要像抖音爆款视频截图，不是产品广告大片，要有生活感和真实感
 - 必须包含：镜头参数（lens mm, aperture）、构图法则
 - 避免生成正脸和手指细节（AI弱项），用虚化/局部/背影/剪影代替
 - 连续镜头间要有景别和构图的节奏变化（特写→中景→俯拍→特写），但色调和场景保持统一
@@ -2388,30 +2441,41 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
 /* schedule page */
 .sch-wrap{display:flex;height:calc(100vh - 52px);overflow:hidden}
 .sch-main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-.sch-top{padding:14px 20px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--bl);background:var(--s)}
-.sch-legend{display:flex;gap:12px;margin-left:auto;font-size:11px;color:var(--t2)}
-.sch-legend span::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.sch-top{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--bl);background:var(--s)}
+.sch-month-title{font-size:20px;font-weight:800;color:var(--t1);white-space:nowrap;letter-spacing:-.3px}
+.sch-nav-arrows{display:flex;gap:4px}
+.sch-nav-arr{width:28px;height:28px;border-radius:50%;border:none;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--t2);transition:var(--tr);font-family:inherit}.sch-nav-arr:hover{background:var(--s3);color:var(--t1)}
+.sch-today-btn{padding:4px 12px;border-radius:16px;font-size:12px;font-weight:600;cursor:pointer;border:1.5px solid var(--bl);background:var(--s);color:var(--t1);font-family:inherit;transition:var(--tr)}.sch-today-btn:hover{border-color:var(--p);color:var(--p)}
+.sch-legend{display:flex;gap:14px;margin-left:auto;font-size:11px;color:var(--t2)}
+.sch-legend span{display:flex;align-items:center;gap:5px}
+.sch-legend span::before{content:'';width:8px;height:8px;border-radius:2px;flex-shrink:0}
 .sch-legend .lg-sell::before{background:#3B82F6}.sch-legend .lg-edu::before{background:#10B981}.sch-legend .lg-story::before{background:var(--p)}.sch-legend .lg-daily::before{background:#F59E0B}
-.sch-cal{flex:1;overflow:auto;padding:0}
-.sch-cal table{width:100%;border-collapse:collapse;table-layout:fixed}
-.sch-cal th{padding:10px 4px;font-size:12px;font-weight:600;color:var(--t3);text-align:center;border-bottom:1px solid var(--bl);background:var(--s2)}
-.sch-cal th:first-child{width:100px}
-.sch-cal td{border:1px solid var(--bl);vertical-align:top;padding:4px 6px;height:90px;font-size:12px;cursor:pointer;transition:background .15s;background:var(--s);overflow-y:auto}
-.sch-cal td::-webkit-scrollbar{width:2px}.sch-cal td::-webkit-scrollbar-thumb{background:var(--b);border-radius:1px}
-.sch-cal td:first-child{background:var(--s2);text-align:center;vertical-align:middle;cursor:default;border:1px solid var(--bl)}
-.sch-cal td:hover{background:var(--s2)}
-.sch-cal td .day-n{font-weight:600;color:var(--t1);margin-bottom:2px}.sch-cal td.dim .day-n{color:var(--t3)}
-.sch-cal td.today{background:#F5F0FF}.sch-cal td.today .day-n{color:var(--p)}
-.sch-today-badge{display:inline-block;padding:1px 6px;border-radius:4px;background:var(--p);color:#fff;font-size:9px;font-weight:700;margin-left:3px}
-.sch-wk-n{font-size:11px;font-weight:700;color:var(--p);margin-bottom:2px}
-.sch-wk-d{font-size:9px;color:var(--t3);cursor:pointer}.sch-wk-d:hover{color:var(--p)}
-.sch-nav{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;border-top:1px solid var(--bl);background:var(--s)}
-.sch-nav-btn{padding:6px 14px;border-radius:8px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--bl);background:var(--s);color:var(--t2);font-family:inherit;transition:var(--tr)}.sch-nav-btn:hover{border-color:var(--pl);color:var(--p)}
-.sch-nav-btn.today{background:var(--p);color:#fff;border-color:var(--p)}.sch-nav-btn.today:hover{background:var(--pd)}
-.sch-pub{display:flex;gap:8px;margin-left:auto}
-.sch-pub-btn{padding:7px 18px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:var(--tr);display:flex;align-items:center;gap:4px}
-.sch-pub-btn.pri{border:none;background:var(--p);color:#fff;box-shadow:0 2px 8px rgba(124,58,237,.2)}.sch-pub-btn.pri:hover{background:var(--pd)}
-.sch-pub-btn.sec{border:1px solid var(--bl);background:var(--s);color:var(--t2)}.sch-pub-btn.sec:hover{border-color:var(--pl)}
+.sch-pub{display:flex;gap:8px;margin-left:12px}
+.sch-pub-btn{padding:7px 18px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:var(--tr);display:flex;align-items:center;gap:5px}
+.sch-pub-btn.pri{border:none;background:var(--p);color:#fff;box-shadow:0 1px 4px rgba(124,58,237,.18)}.sch-pub-btn.pri:hover{background:var(--pd)}
+.sch-pub-btn.sec{border:1.5px solid var(--bl);background:var(--s);color:var(--t2)}.sch-pub-btn.sec:hover{border-color:var(--t3)}
+.sch-cal{flex:1;overflow:auto;padding:0 16px 16px}
+.sch-grid-hd{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid var(--bl)}
+.sch-grid-hd span{padding:8px 0;font-size:11px;font-weight:600;color:var(--t3);text-align:center;text-transform:uppercase;letter-spacing:.5px}
+.sch-grid{display:grid;grid-template-columns:repeat(7,1fr)}
+.sch-cell{border-bottom:1px solid color-mix(in srgb,var(--bl) 60%,transparent);border-right:1px solid color-mix(in srgb,var(--bl) 60%,transparent);min-height:120px;padding:8px;background:var(--s);cursor:pointer;transition:background .12s}
+.sch-cell:nth-child(7n){border-right:none}
+.sch-cell:hover{background:var(--s2)}
+.sch-cell.dim{opacity:.35;min-height:90px}.sch-cell.dim:hover{opacity:.5}
+.sch-cell.today{background:var(--s)}
+.sch-cell-hd{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.sch-day-n{font-size:13px;font-weight:500;color:var(--t2);width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;transition:background .15s}
+.sch-cell:hover .sch-day-n{background:var(--s3)}
+.sch-cell.dim .sch-day-n{color:var(--t3);font-weight:400}
+.sch-cell.today .sch-day-n{background:var(--p);color:#fff;font-weight:700;font-size:13px}
+.sch-task-count{font-size:10px;color:var(--t3);font-weight:400}
+.sch-pill{display:flex;align-items:center;gap:5px;padding:4px 8px;margin-bottom:2px;border-radius:6px;font-size:11px;line-height:1;cursor:pointer;transition:opacity .12s;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#fff;font-weight:500}
+.sch-pill:hover{opacity:.85}
+.sch-pill-time{font-size:10px;opacity:.85;flex-shrink:0}
+.sch-pill-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sch-pill-icon{font-size:9px;flex-shrink:0;opacity:.8}
+.sch-more{font-size:10px;color:var(--t3);cursor:pointer;margin-top:2px;padding:2px 8px;border-radius:4px;font-weight:500;transition:var(--tr);display:flex;align-items:center;gap:3px}.sch-more:hover{background:var(--s2);color:var(--p)}
+.sch-cell.expanded{min-height:auto;z-index:2;background:var(--s);box-shadow:0 4px 16px rgba(0,0,0,.08)}
 /* schedule sidebar */
 .sch-side{width:280px;min-width:280px;background:var(--s);border-left:1px solid var(--bl);padding:20px 16px;overflow-y:auto}
 .sch-side::-webkit-scrollbar{width:4px}.sch-side::-webkit-scrollbar-thumb{background:var(--b);border-radius:2px}
@@ -2486,6 +2550,9 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
 .sch-media-item:hover .sch-media-del{opacity:1}
 .sch-media-cover{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(124,58,237,.8));color:#fff;font-size:9px;font-weight:700;text-align:center;padding:2px 0 3px;letter-spacing:1px}
 .sch-media-hint{font-size:11px;color:var(--r);margin-top:6px;display:flex;align-items:center;gap:4px}
+/* article mode hover effects */
+.sch-cover-dashed:hover{border-color:var(--p) !important}
+div:hover>.sch-inline-del{opacity:1 !important}
 /* content inputs */
 .sch-inp-title{width:100%;padding:12px 16px;border-radius:12px;border:1.5px solid var(--bl);font-size:15px;font-weight:700;font-family:inherit;outline:none;color:var(--t1);background:var(--s);transition:var(--tr)}
 .sch-inp-title:focus{border-color:var(--p);box-shadow:0 0 0 3px var(--pg)}
@@ -3302,35 +3369,43 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
         <div className="sch-wrap">
           <div className="sch-main">
             <div className="sch-top">
-              <div className="sch-legend"><span className="lg-sell">带货类</span><span className="lg-edu">科普类</span><span className="lg-story">剧情类</span><span className="lg-daily">日常/预热</span></div>
-            </div>
-            <div className="sch-cal"><table><thead><tr>
-              <th>每周目标</th><th>周一</th><th>周二</th><th>周三</th><th>周四</th><th>周五</th><th>周六</th><th>周日</th>
-            </tr></thead><tbody>
-              {Array.from({length:6}).map((_,wi)=>{
-                const days=getCalDays().slice(wi*7,wi*7+7);
-                if(wi>0&&!days.some(d=>d.cur))return null;
-                return <tr key={wi}>
-                  <td><div className="sch-wk-n">WEEK {String(wi+1).padStart(2,'0')}</div><div className="sch-wk-d">点击设置周目标</div></td>
-                  {days.map((d,di)=>{
-                    const dayTasks=d.cur?schGetTasksForDay(d.d):[];
-                    return <td key={di} className={`${d.cur?"":"dim"} ${d.today?"today":""}`} onClick={()=>{setSchDate(`${schYear}-${String(schMonth+1).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`);setSchModal(true);}}>
-                      <div className="day-n">{d.d}{d.today&&<span className="sch-today-badge">今天</span>}</div>
-                      {dayTasks.map(t=><div key={t.id} className="sch-cal-task" style={{background:t.status==="failed"?"#EF4444":t.color||"var(--p)",color:"#fff",fontSize:9,padding:"1px 4px",borderRadius:3,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer"}} onClick={e=>{e.stopPropagation();setSchLogModal(t.id);}} title={`${t.title||t.content?.slice(0,30)||t.platform} [${t.status}]`}>
-                        {t.status==="success"?"✓ ":t.status==="failed"?"✗ ":t.status==="running"?"⟳ ":"◷ "}{t.title||t.platform}
-                      </div>)}
-                    </td>;
-                  })}
-                </tr>;
-              })}
-            </tbody></table></div>
-            <div className="sch-nav">
-              <button className="sch-nav-btn" onClick={()=>{if(schMonth===0){setSchMonth(11);setSchYear(schYear-1)}else setSchMonth(schMonth-1)}}>&lt; 上一个月</button>
-              <button className="sch-nav-btn today" onClick={()=>{setSchMonth(new Date().getMonth());setSchYear(new Date().getFullYear())}}>今天</button>
-              <button className="sch-nav-btn" onClick={()=>{if(schMonth===11){setSchMonth(0);setSchYear(schYear+1)}else setSchMonth(schMonth+1)}}>下一个月 &gt;</button>
+              <span className="sch-month-title">{schYear}年 {schMonth+1}月</span>
+              <div className="sch-nav-arrows">
+                <button className="sch-nav-arr" onClick={()=>{if(schMonth===0){setSchMonth(11);setSchYear(schYear-1)}else setSchMonth(schMonth-1)}}><I.ArrowL/></button>
+                <button className="sch-nav-arr" onClick={()=>{if(schMonth===11){setSchMonth(0);setSchYear(schYear+1)}else setSchMonth(schMonth+1)}}><I.ArrowR/></button>
+              </div>
+              <button className="sch-today-btn" onClick={()=>{setSchMonth(new Date().getMonth());setSchYear(new Date().getFullYear())}}>今天</button>
+              <div className="sch-legend"><span className="lg-sell">带货</span><span className="lg-edu">科普</span><span className="lg-story">剧情</span><span className="lg-daily">日常</span></div>
               <div className="sch-pub">
-                <button className="sch-pub-btn pri" onClick={()=>setSchModal(true)}><I.Zap/> 一键发布</button>
-                <button className="sch-pub-btn sec" onClick={()=>setSchModal(true)}><I.Clock/> 定时发布</button>
+                <button className="sch-pub-btn pri" onClick={()=>setSchModal(true)}><I.Plus/> 新建排期</button>
+              </div>
+            </div>
+            <div className="sch-cal">
+              <div className="sch-grid-hd"><span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span><span>周日</span></div>
+              <div className="sch-grid">
+                {(()=>{const allDays=getCalDays();let lastCur=0;for(let i=allDays.length-1;i>=0;i--){if(allDays[i].cur){lastCur=i;break;}}const rows=Math.ceil((lastCur+1)/7);return allDays.slice(0,rows*7);})().map((d,i)=>{
+                  const dayTasks=d.cur?schGetTasksForDay(d.d):[];
+                  const dayKey=`${schYear}-${schMonth}-${d.d}`;
+                  const expanded=!!schExpandedDays[dayKey];
+                  const maxShow=3;
+                  const visibleTasks=expanded?dayTasks:dayTasks.slice(0,maxShow);
+                  const hasMore=dayTasks.length>maxShow;
+                  const pillBg=t=>{const c=t.color||"var(--p)";return t.status==="failed"?"#EF4444":t.status==="running"?"#3B82F6":t.status==="manual"?"#9CA3AF":c;};
+                  const statusIcon=t=>t.status==="success"?"\u2713":t.status==="failed"?"\u2717":t.status==="running"?"\u25F7":t.status==="manual"?"\u270E":"";
+                  return <div key={i} className={`sch-cell${d.cur?"":" dim"}${d.today?" today":""}${expanded?" expanded":""}`} onClick={()=>{if(d.cur){setSchDate(`${schYear}-${String(schMonth+1).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`);setSchModal(true);}}}>
+                    <div className="sch-cell-hd">
+                      <span className="sch-day-n">{d.d}</span>
+                      {dayTasks.length>0&&<span className="sch-task-count">{dayTasks.length}个排期</span>}
+                    </div>
+                    {visibleTasks.map(t=><div key={t.id} className="sch-pill" style={{background:pillBg(t)}} onClick={e=>{e.stopPropagation();setSchLogModal(t.id);}} title={`${t.title||t.content?.slice(0,30)||t.platform} [${t.status}]`}>
+                      {statusIcon(t)&&<span className="sch-pill-icon">{statusIcon(t)}</span>}
+                      {t.scheduled_at&&<span className="sch-pill-time">{new Date(t.scheduled_at).toTimeString().slice(0,5)}</span>}
+                      <span className="sch-pill-title">{t.title||t.platform}</span>
+                    </div>)}
+                    {hasMore&&!expanded&&<div className="sch-more" onClick={e=>{e.stopPropagation();setSchExpandedDays(p=>({...p,[dayKey]:true}));}}>还有 {dayTasks.length-maxShow} 项 <I.ChevronD/></div>}
+                    {hasMore&&expanded&&<div className="sch-more" onClick={e=>{e.stopPropagation();setSchExpandedDays(p=>{const n={...p};delete n[dayKey];return n;});}}>收起 <I.ChevronR style={{transform:"rotate(-90deg)"}}/></div>}
+                  </div>;
+                })}
               </div>
             </div>
           </div>
@@ -3466,30 +3541,73 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                   </div>
                 </div>
                 <div className="sch-media-zone">
-                  {schContentType==="article"?<>
-                    {/* 公众号文章模式：图片用途选择 */}
-                    {schPlatBtns[3]&&<div style={{display:"flex",gap:8,marginBottom:10}}>
-                      <div style={{flex:1,padding:"8px 12px",borderRadius:8,border:schWxImgMode==="cover"?"2px solid var(--p)":"1.5px solid var(--b2)",cursor:"pointer",background:schWxImgMode==="cover"?"var(--p-bg)":"var(--s1)",transition:"all .15s"}} onClick={()=>setSchWxImgMode("cover")}>
-                        <div style={{fontSize:12,fontWeight:600,color:schWxImgMode==="cover"?"var(--p)":"var(--t1)"}}>仅作封面</div>
-                        <div style={{fontSize:10,color:"var(--t3)",marginTop:2}}>图片仅用作文章封面缩略图，正文为纯文字</div>
+                  {schContentType==="article"?<div style={{display:"flex",flexDirection:"column",gap:12,width:"100%"}}>
+                    {/* 隐藏的文件选择器 */}
+                    <input ref={schFileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
+                      const role=schFileRef.current?.getAttribute("data-role")||"inline";
+                      const files=Array.from(e.target.files);
+                      if(!files.length)return;
+                      (async()=>{
+                        const uploaded=[];
+                        for(const f of files){const sp=await schUploadFile(f);uploaded.push({name:f.name,serverPath:sp,preview:URL.createObjectURL(f),_role:role});}
+                        setSchFiles(prev=>role==="cover"?[...prev.filter(x=>x._role!=="cover"),...uploaded]:[...prev,...uploaded]);
+                      })();
+                      e.target.value="";
+                    }}/>
+                    {/* ── 封面图卡片 ── */}
+                    <div style={{background:"var(--s1)",border:"1px solid var(--bl)",borderRadius:10,padding:12}}>
+                      <div style={{fontSize:12,fontWeight:600,color:"var(--t1)",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{background:"var(--pbg)",color:"var(--p)",width:20,height:20,borderRadius:6,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700}}>封</span>
+                        封面图
+                        <span style={{fontWeight:400,color:"var(--t3)",fontSize:10,marginLeft:"auto"}}>可选 · 展示在文章列表</span>
                       </div>
-                      <div style={{flex:1,padding:"8px 12px",borderRadius:8,border:schWxImgMode==="inline"?"2px solid var(--p)":"1.5px solid var(--b2)",cursor:"pointer",background:schWxImgMode==="inline"?"var(--p-bg)":"var(--s1)",transition:"all .15s"}} onClick={()=>setSchWxImgMode("inline")}>
-                        <div style={{fontSize:12,fontWeight:600,color:schWxImgMode==="inline"?"var(--p)":"var(--t1)"}}>插入正文</div>
-                        <div style={{fontSize:10,color:"var(--t3)",marginTop:2}}>首图为封面，其余图片自动插入正文段落间</div>
-                      </div>
-                    </div>}
-                    <div className="sch-media-add" onClick={()=>schFileRef.current?.click()}>
-                      <I.Plus style={{width:20,height:20}}/>
-                      <span>{schWxImgMode==="inline"?"添加图片（首张为封面）":"添加封面图"}</span>
-                      <span style={{fontSize:9,color:"var(--t3)"}}>{schWxImgMode==="inline"?"可多选，jpg/png":"可选，jpg/png"}</span>
-                      <input ref={schFileRef} type="file" accept="image/*" multiple={schWxImgMode==="inline"} style={{display:"none"}} onChange={schHandleFiles}/>
+                      {!schFiles.some(f=>f._role==="cover")?
+                        <div style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",cursor:"pointer",color:"var(--t3)"}} onClick={()=>{schFileRef.current?.setAttribute("data-role","cover");schFileRef.current?.click();}}>
+                          <div style={{width:72,height:48,borderRadius:8,border:"2px dashed var(--bl)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"var(--tr)"}} className="sch-cover-dashed">
+                            <I.Plus style={{width:16,height:16,opacity:.5}}/>
+                          </div>
+                          <div>
+                            <div style={{fontSize:12,color:"var(--t2)",fontWeight:500}}>点击上传封面图</div>
+                            <div style={{fontSize:10,color:"var(--t3)",marginTop:2}}>建议 2.35:1 横图，jpg / png</div>
+                          </div>
+                        </div>
+                      :<div style={{display:"flex",alignItems:"center",gap:12}}>
+                        {schFiles.filter(f=>f._role==="cover").map((f,i)=><div key={"c"+i} style={{width:90,height:60,borderRadius:8,overflow:"hidden",position:"relative",border:"1px solid var(--bl)",flexShrink:0}}>
+                          <img src={f.preview} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                          <div style={{position:"absolute",top:2,right:2,width:18,height:18,borderRadius:"50%",background:"rgba(0,0,0,.55)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}} onClick={()=>setSchFiles(prev=>prev.filter(x=>x!==f))}><I.X style={{width:8,height:8}}/></div>
+                        </div>)}
+                        <div style={{fontSize:11,color:"var(--p)",cursor:"pointer",fontWeight:500}} onClick={()=>{schFileRef.current?.setAttribute("data-role","cover");schFileRef.current?.click();}}>更换封面</div>
+                      </div>}
                     </div>
-                    {schFiles.map((f,i)=><div key={i} className="sch-media-item">
-                      <img src={f.preview} alt=""/>
-                      <div className="sch-media-del" onClick={()=>setSchFiles(schFiles.filter((_,j)=>j!==i))}><I.X style={{width:10,height:10}}/></div>
-                      {i===0?<div className="sch-media-cover">封面</div>:schWxImgMode==="inline"&&<div className="sch-media-cover" style={{background:"rgba(59,130,246,.85)"}}>插图{i}</div>}
-                    </div>)}
-                  </>:schContentType==="image"?<>
+                    {/* ── 正文插图卡片 ── */}
+                    <div style={{background:"var(--s1)",border:"1px solid var(--bl)",borderRadius:10,padding:12}}>
+                      <div style={{fontSize:12,fontWeight:600,color:"var(--t1)",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{background:"rgba(59,130,246,.1)",color:"#3B82F6",width:20,height:20,borderRadius:6,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700}}>图</span>
+                        正文插图
+                        <span style={{fontWeight:400,color:"var(--t3)",fontSize:10,marginLeft:"auto"}}>可选</span>
+                      </div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                        {schFiles.filter(f=>f._role==="inline").map((f,i)=><div key={"i"+i} style={{width:72,height:72,borderRadius:8,overflow:"hidden",position:"relative",border:"1px solid var(--bl)"}}>
+                          <img src={f.preview} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                          <div style={{position:"absolute",top:2,right:2,width:18,height:18,borderRadius:"50%",background:"rgba(0,0,0,.55)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",opacity:0,transition:"var(--tr)"}} className="sch-inline-del" onClick={()=>setSchFiles(prev=>prev.filter(x=>x!==f))}><I.X style={{width:8,height:8}}/></div>
+                          <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(59,130,246,.75))",color:"#fff",fontSize:8,fontWeight:700,textAlign:"center",padding:"1px 0 2px"}}>插图{i+1}</div>
+                        </div>)}
+                        <div style={{width:72,height:72,borderRadius:8,border:"2px dashed var(--bl)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"var(--t3)",fontSize:10,gap:2,transition:"var(--tr)",flexShrink:0}} onClick={()=>{schFileRef.current?.setAttribute("data-role","inline");schFileRef.current?.click();}}>
+                          <I.Plus style={{width:14,height:14}}/>
+                          <span>添加</span>
+                        </div>
+                      </div>
+                      {/* 插图位置选择 */}
+                      {schFiles.some(f=>f._role==="inline")&&<div style={{marginTop:10,display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:11,color:"var(--t2)"}}>插入位置</span>
+                        <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid var(--bl)"}}>
+                          <div onClick={()=>setSchImgPos("start")} style={{padding:"4px 12px",fontSize:10,fontWeight:600,cursor:"pointer",transition:"var(--tr)",background:schImgPos==="start"?"var(--p)":"var(--s)",color:schImgPos==="start"?"#fff":"var(--t3)"}}>正文开头</div>
+                          <div onClick={()=>setSchImgPos("end")} style={{padding:"4px 12px",fontSize:10,fontWeight:600,cursor:"pointer",transition:"var(--tr)",background:schImgPos==="end"?"var(--p)":"var(--s)",color:schImgPos==="end"?"#fff":"var(--t3)"}}>正文结尾</div>
+                        </div>
+                      </div>}
+                      {schFiles.filter(f=>f._role==="inline").length===0&&<div style={{fontSize:10,color:"var(--t3)",marginTop:6}}>上传图片后可选择插入到正文开头或结尾</div>}
+                    </div>
+                  </div>:schContentType==="image"?<>
                     <div className="sch-media-add" onClick={()=>schFileRef.current?.click()}>
                       <I.Plus style={{width:20,height:20}}/>
                       <span>添加图片</span>
@@ -3517,7 +3635,8 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                     </div>}
                   </>}
                 </div>
-                {schFiles.length===0&&<div className="sch-media-hint">{schContentType==="video"?"请上传一个视频文件":schContentType==="article"?"封面图可选，不上传将使用默认封面":"请至少上传一张图片作为发布素材"}</div>}
+                {schContentType==="video"&&schFiles.length===0&&<div className="sch-media-hint">请上传一个视频文件</div>}
+                {schContentType==="image"&&schFiles.length===0&&<div className="sch-media-hint">请至少上传一张图片作为发布素材</div>}
               </div>
 
               {/* Step 3: 内容 */}
@@ -3569,13 +3688,23 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                     {schAiLoading?<><span className="sch-ai-spin"/>分析中...</>:<><I.Sparkle style={{width:13,height:13}}/> AI推荐</>}
                   </button>
                 </div>
-                <div className="sch-time-hint">定时发布仅支持14天内，确认后将自动在平台设置定时发布</div>
+                <div className="sch-time-hint">定时发布仅支持14天内</div>
+              </div>
+              {/* 发布方式选择 */}
+              <div style={{background:"var(--s1)",border:"1px solid var(--bl)",borderRadius:10,padding:"10px 14px",marginTop:12}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:12,fontWeight:600,color:"var(--t1)"}}>自动发布</span>
+                    <span style={{fontSize:10,color:"var(--t3)"}}>{schAutoPublish?"AI自动打开浏览器发布到平台":"仅保存计划，稍后手动标记状态"}</span>
+                  </div>
+                  <div style={{cursor:"pointer"}} onClick={()=>setSchAutoPublish(!schAutoPublish)}>{schAutoPublish?<I.TglOn/>:<I.TglOff/>}</div>
+                </div>
               </div>
             </div>
             <div className="sch-mdl-foot">
               <div className="sch-foot-info">{schFiles.length>0&&<span>{schFiles.length} 张素材已上传</span>}</div>
               <button className="sch-f-btn sch-f-cancel" onClick={()=>setSchModal(false)}>取消</button>
-              <button className="sch-f-btn sch-f-confirm" onClick={schCreateTask} disabled={schPublishing}>{schPublishing?"创建中...":schTab===1?"确认提醒":"确认发布"}</button>
+              <button className="sch-f-btn sch-f-confirm" onClick={schCreateTask} disabled={schPublishing}>{schPublishing?"创建中...":schTab===1?"确认提醒":schAutoPublish?"确认发布":"保存计划"}</button>
             </div>
           </div>
 
@@ -4423,7 +4552,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                   const ol=outlines.outlines||[];if(!ol.length)throw new Error("未生成大纲");
                   setAiGenStep(`正在并行创作${ol.length}个脚本...`);
                   const riskRules="禁止极限词(最好用/第一/唯一) | 禁止医疗词 | 敏感肌→敏敏肌 | 美白→提亮肤色";
-                  const results=await Promise.all(ol.map(o=>generateJSON({model:"gemini-2.5-pro",system:`你是一位顶级短视频脚本创作者+AI视觉导演，台词100%口语化。脚本将通过AI生图+AI生视频制作。${ipCtx}`,prompt:`展开脚本大纲：\n产品：${p}（${c}）| 时长：${d}\n方案：${o.name}｜${o.type}｜${o.emotion}\n步骤：${o.structure.join("→")}\n${riskRules}\n台词铁律：①100%口语②每句≤15字③自然衔接④开场有钩子抓人⑤字数匹配时长(4-5字/秒)\n\n【最重要】视觉一致性：你必须先设计一个visual_anchor对象，包含character(固定人物外观,英文)、setting(固定场景,英文)、product(固定产品外观,英文)、palette(统一色调和摄影风格,英文)。所有镜头共享同一人物/场景/色调！\n\nAI画面铁律：scene是中文画面描述，image_prompt是英文AI生图提示词(40-80词)，只写该镜头特有的景别/构图/动作/光效，不要重复visual_anchor中的人物/场景/色调(系统会自动拼接)\nbadges：2-3个标签，c用conv/exp/auth\nJSON：{"name":"${o.name}","dur":"${d}","shots":${o.shots},"sell":3,"desc":"一句话概括创意亮点(30字内)","badges":[{"t":"高转化","c":"conv"}],"visual_anchor":{"character":"English description","setting":"English description","product":"English description","palette":"English description"},"logic":${JSON.stringify(o.structure)},"table":[{"shot":1,"dur":"3秒","scene":"中文画面","copy":"旁白台词","image_prompt":"English shot-specific prompt only","risk":false,"intent":"情绪+目的"}]}`,temperature:0.7,maxTokens:6144}).catch(()=>({name:o.name,dur:d,shots:o.shots,sell:3,desc:o.type,badges:[{t:"异常",c:"exp"}],logic:o.structure,table:[]}))));
+                  const results=await Promise.all(ol.map(o=>generateJSON({model:"gemini-2.5-pro",system:`你是一位顶级短视频脚本创作者+AI视觉导演，台词100%口语化。脚本将通过AI生图+AI生视频制作。${ipCtx}`,prompt:`展开脚本大纲：\n产品：${p}（${c}）| 时长：${d}\n${prodDesc?"【⚠️产品真实信息—禁止编造】"+prodDesc+"\n":""}\n方案：${o.name}｜${o.type}｜${o.emotion}\n步骤：${o.structure.join("→")}\n${riskRules}\n台词铁律：①100%口语②每句≤15字③自然衔接④开场有钩子抓人⑤字数匹配时长(4-5字/秒)\n\n【最重要】视觉一致性：你必须先设计一个visual_anchor对象，这是保证整个视频视觉统一的关键：\n- character：固定主角外观（性别年龄发型服装配饰，足够具体让AI每次画出同一个人），如"25-year-old Asian woman with long straight black hair, wearing cream oversized knit sweater, small gold stud earrings"，不需要人物则写"none"\n- setting：固定主场景（所有镜头共享同一空间），如"modern bathroom vanity, white marble countertop, round LED mirror, morning light from right"\n- product：固定产品外观（极其具体+必须写no text no label no logo），如"white frosted glass jar with silver lid, 50ml round shape, no text no label no logo"\n- palette：统一摄影风格，如"warm daylight, golden tones, iPhone 15 Pro feel, Douyin lifestyle vlog aesthetic, shallow depth of field"\n所有字段必须英文！product必须含"no text no label no logo"！\n\nAI画面铁律：scene是中文画面描述，image_prompt是英文(40-80词)只写该镜头的景别/构图/动作/光效，不重复anchor内容。每个image_prompt必须以"no text, no words, no labels in image."结尾。风格要像抖音爆款视频截图不是产品广告大片。\nbadges：2-3个标签，c用conv/exp/auth\nJSON：{"name":"${o.name}","dur":"${d}","shots":${o.shots},"sell":3,"desc":"一句话概括创意亮点(30字内)","badges":[{"t":"高转化","c":"conv"}],"visual_anchor":{"character":"English description","setting":"English description","product":"English description with no text no label no logo","palette":"English description"},"logic":${JSON.stringify(o.structure)},"table":[{"shot":1,"dur":"3秒","scene":"中文画面","copy":"旁白台词","image_prompt":"English shot-specific prompt, ending with: no text, no words, no labels in image.","risk":false,"intent":"情绪+目的"}]}`,temperature:0.7,maxTokens:6144}).catch(()=>({name:o.name,dur:d,shots:o.shots,sell:3,desc:o.type,badges:[{t:"异常",c:"exp"}],logic:o.structure,table:[]}))));
                   setAiScripts(results.map((s,i)=>({...s,id:i+1,badges:s.badges||[],logic:s.logic||[],table:s.table||[],name:s.name||`方案${i+1}`,dur:s.dur||d,shots:s.shots||0,sell:s.sell||0,desc:s.desc||""})));setCs("results");
                 }catch(e){console.error("[侧边栏AI生成失败]",e);setAiScripts([]);setCs("results");setTimeout(()=>alert("AI脚本生成失败："+e.message+"\n\n当前显示的是内置示例脚本。"),300);}
               }}><I.Zap/> 根据对话生成脚本</button>}
@@ -4446,6 +4575,30 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
               <button style={{border:"none",background:"none",cursor:"pointer",color:"var(--t3)",padding:2}} onClick={()=>setLibSelTmpl(null)}><I.X/></button>
             </div>}
             <div className="fg2"><label className="fg2-l">产品名称 <span className="rq">*</span></label><input className="fin" value={prod} onChange={e=>setProd(e.target.value)} placeholder="如：美白面霜、智能手表"/></div>
+            <div className="fg2"><label className="fg2-l">产品实拍图 <span style={{color:"var(--t3)",fontWeight:400,fontSize:11}}>（强烈推荐，保证画面一致性）</span></label>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
+                {prodImages.map((img,i)=><div key={i} style={{position:"relative",width:72,height:72,borderRadius:8,overflow:"hidden",border:"1.5px solid var(--bl)"}}>
+                  <img src={img} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                  <button onClick={()=>setProdImages(prev=>prev.filter((_,j)=>j!==i))} style={{position:"absolute",top:2,right:2,width:18,height:18,borderRadius:9,background:"rgba(0,0,0,.6)",color:"#fff",border:"none",cursor:"pointer",fontSize:11,lineHeight:"18px",textAlign:"center"}}>×</button>
+                </div>)}
+                {prodImages.length<4&&<label style={{width:72,height:72,borderRadius:8,border:"2px dashed var(--bl)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"var(--t3)",fontSize:11,gap:2}}>
+                  <span style={{fontSize:20}}>+</span>上传
+                  <input type="file" accept="image/*" multiple hidden onChange={e=>{
+                    const files=Array.from(e.target.files||[]);
+                    files.slice(0,4-prodImages.length).forEach(f=>{
+                      const reader=new FileReader();
+                      reader.onload=ev=>setProdImages(prev=>[...prev,ev.target.result].slice(0,4));
+                      reader.readAsDataURL(f);
+                    });
+                    e.target.value="";
+                  }}/>
+                </label>}
+              </div>
+              <div style={{fontSize:11,color:"var(--t3)",marginTop:4}}>上传1-4张产品实物照片，AI会在所有镜头中使用同一产品形象</div>
+            </div>
+            <div className="fg2"><label className="fg2-l">产品描述/卖点 <span style={{color:"var(--t3)",fontWeight:400,fontSize:11}}>（强烈推荐，避免AI瞎编功能）</span></label>
+              <textarea className="fin" value={prodDesc} onChange={e=>setProdDesc(e.target.value)} placeholder={"例如：粉色陶瓷马克杯，350ml容量，简约北欧风设计，适合办公室和家用。\n\n写清楚：产品是什么、材质/外观、核心卖点、使用场景等，AI会严格按你的描述来写脚本。"} rows={3} style={{resize:"vertical",lineHeight:1.6}}/>
+            </div>
             <div className="fg2"><label className="fg2-l">品类</label><div className="chs">{["美妆护肤","食品保健","数码3C","服装鞋包","家居生活","教育培训","母婴","其他"].map(c=><button key={c} className={`ch ${cat===c?"on":""}`} onClick={()=>setCat(c)}>{c}</button>)}</div></div>
             <div className="fg2"><label className="fg2-l">视频时长</label><div className="chs">{["30秒","60秒","2分钟","3分钟"].map(d=><button key={d} className={`ch ${dur===d?"on":""}`} onClick={()=>setDur(d)}>{d}</button>)}</div></div>
             <div className="fg2"><div className="tr"><span className="trl">创意增强</span><button className="trb" onClick={()=>setDataOn(!dataOn)}>{dataOn?<I.TglOn/>:<I.TglOff/>}</button></div><div className="dh">分析真实爆款视频+评论，AI创意增强生成脚本(需增加约3-5分钟)</div></div>
