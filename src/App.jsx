@@ -293,11 +293,11 @@ export default function App(){
     if(!schSelAccounts.length)return alert("请选择至少一个发布账号");
     if(schNeedTitle&&!schTitle.trim())return alert("请输入标题");
     if(!schNeedTitle&&!schDesc.trim())return alert("请输入视频文案");
-    if(schTab!==1&&schContentType!=="article"&&schFiles.length===0)return alert(schContentType==="video"?"请上传视频文件":"请上传至少一张素材图片");
+    if(schAutoPublish&&schTab!==1&&schContentType!=="article"&&schFiles.length===0)return alert(schContentType==="video"?"请上传视频文件":"请上传至少一张素材图片");
     const dt=`${schDate}T${schTime}:00`;
     const selTime=new Date(dt);const nowTime=new Date();
-    if(selTime<=nowTime)return alert("发布时间必须在当前时间之后");
-    if(selTime>new Date(Date.now()+14*86400000))return alert("定时发布仅支持14天内，请重新选择时间");
+    if(schAutoPublish&&selTime<=nowTime)return alert("发布时间必须在当前时间之后");
+    if(schAutoPublish&&selTime>new Date(Date.now()+14*86400000))return alert("定时发布仅支持14天内，请重新选择时间");
     setSchPublishing(true);
     try{
       const mediaPaths=schFiles.map(f=>f.serverPath).filter(Boolean);
@@ -1693,12 +1693,23 @@ badges说明：每个方案给2-3个描述性标签，t是标签文字（如"高
 JSON输出（严格按此格式，visual_anchor是全局共享的，table数组每个元素都必须包含所有字段）：
 {"name":"${outline.name}","dur":"${dur}","shots":${outline.shots},"sell":3,"desc":"一句话概括创意亮点（30字内，像爆款视频简介，要有冲击力）","badges":[{"t":"标签","c":"类型"}],"visual_anchor":{"character":"young Asian woman with shoulder-length black hair in loose bun, wearing oversized cream linen shirt, small gold hoop earrings","setting":"modern minimalist kitchen, light oak cabinets, white marble countertop with grey veins, wooden cutting board, green plant in corner, large window on left","product":"stainless steel mandoline slicer with black ergonomic handle, 30cm tall","palette":"warm natural daylight from left window, soft golden tones, slight film grain, Canon 50mm f/1.4, shallow depth of field, lifestyle commercial photography"},"logic":${JSON.stringify(outline.structure)},"table":[{"shot":1,"dur":"3秒","scene":"【类型：产品英雄镜头】【大特写·缓慢推进】产品放在大理石台面上，侧逆光穿过产品折射光斑，背景失焦绿植【暖橘调】【转场：从黑屏淡入】","copy":"旁白台词（用...标停顿，【重】标重音）","image_prompt":"extreme close-up with slow push-in, product placed at 45-degree angle on countertop, single rim light from upper left creating amber lens flare, blurred green leaves in background, macro 100mm f/2.8, rule of thirds composition, cinematic still life","risk":false,"intent":"好奇9→期待10 | 战术：视觉冲击建立品质感，黄金3秒留住观众 | 完播策略：高级画面+悬念旁白制造信息缺口"}]}`;
 
-      const results=await Promise.all(outlines.map(o=>
-        generateJSON({model:"gemini-2.5-pro",system:sysScript,prompt:expandOne(o),temperature:0.7,maxTokens:6144}).catch(e=>{
-          console.error("方案展开失败:",e);
-          return{name:o.name,dur:dur,shots:o.shots,sell:3,desc:o.type,badges:[{t:"生成异常",c:"exp"}],logic:o.structure,table:[]};
-        })
-      ));
+      // 并行展开，失败自动重试1次
+      const expandWithRetry=async(o)=>{
+        for(let attempt=0;attempt<2;attempt++){
+          try{
+            const r=await generateJSON({model:"gemini-2.5-pro",system:sysScript,prompt:expandOne(o),temperature:0.7,maxTokens:6144});
+            if(r&&r.table&&r.table.length>0)return r;
+            if(attempt===0){console.warn(`方案「${o.name}」返回空table，重试...`);await new Promise(r=>setTimeout(r,2000));}
+          }catch(e){
+            console.error(`方案「${o.name}」展开失败(尝试${attempt+1}):`,e);
+            if(attempt===0)await new Promise(r=>setTimeout(r,2000));
+          }
+        }
+        return null; // 两次都失败
+      };
+      const raw=await Promise.all(outlines.map(o=>expandWithRetry(o)));
+      const results=raw.filter(r=>r&&r.table&&r.table.length>0); // 过滤掉失败的空方案
+      if(results.length===0)throw new Error("所有方案生成失败，请重试");
 
       setAiScripts(results.map((s,i)=>({...s,id:i+1,badges:s.badges||[],logic:s.logic||[],table:s.table||[],name:s.name||`方案${i+1}`,dur:s.dur||dur,shots:s.shots||0,sell:s.sell||0,desc:s.desc||""})));
       setCs("results");
@@ -4562,7 +4573,10 @@ div:hover>.sch-inline-del{opacity:1 !important}
                   const ol=outlines.outlines||[];if(!ol.length)throw new Error("未生成大纲");
                   setAiGenStep(`正在并行创作${ol.length}个脚本...`);
                   const riskRules="禁止极限词(最好用/第一/唯一) | 禁止医疗词 | 敏感肌→敏敏肌 | 美白→提亮肤色";
-                  const results=await Promise.all(ol.map(o=>generateJSON({model:"gemini-2.5-pro",system:`你是一位顶级短视频脚本创作者+AI视觉导演，台词100%口语化。脚本将通过AI生图+AI生视频制作。${ipCtx}`,prompt:`展开脚本大纲：\n产品：${p}（${c}）| 时长：${d}\n${prodDesc?"【⚠️产品真实信息—禁止编造】"+prodDesc+"\n":""}\n方案：${o.name}｜${o.type}｜${o.emotion}\n步骤：${o.structure.join("→")}\n${riskRules}\n台词铁律：①100%口语②每句≤15字③自然衔接④开场有钩子抓人⑤字数匹配时长(4-5字/秒)\n\n【最重要】视觉一致性：你必须先设计一个visual_anchor对象，这是保证整个视频视觉统一的关键：\n- character：固定主角外观（性别年龄发型服装配饰，足够具体让AI每次画出同一个人），如"25-year-old Asian woman with long straight black hair, wearing cream oversized knit sweater, small gold stud earrings"，不需要人物则写"none"\n- setting：固定主场景（所有镜头共享同一空间），如"modern bathroom vanity, white marble countertop, round LED mirror, morning light from right"\n- product：固定产品外观（极其具体+必须写no text no label no logo），如"white frosted glass jar with silver lid, 50ml round shape, no text no label no logo"\n- palette：统一摄影风格，如"warm daylight, golden tones, iPhone 15 Pro feel, Douyin lifestyle vlog aesthetic, shallow depth of field"\n所有字段必须英文！product必须含"no text no label no logo"！\n\nAI画面铁律：scene是中文画面描述，image_prompt是英文(40-80词)只写该镜头的景别/构图/动作/光效，不重复anchor内容。每个image_prompt必须以"no text, no words, no labels in image."结尾。风格要像抖音爆款视频截图不是产品广告大片。\nbadges：2-3个标签，c用conv/exp/auth\nJSON：{"name":"${o.name}","dur":"${d}","shots":${o.shots},"sell":3,"desc":"一句话概括创意亮点(30字内)","badges":[{"t":"高转化","c":"conv"}],"visual_anchor":{"character":"English description","setting":"English description","product":"English description with no text no label no logo","palette":"English description"},"logic":${JSON.stringify(o.structure)},"table":[{"shot":1,"dur":"3秒","scene":"中文画面","copy":"旁白台词","image_prompt":"English shot-specific prompt, ending with: no text, no words, no labels in image.","risk":false,"intent":"情绪+目的"}]}`,temperature:0.7,maxTokens:6144}).catch(()=>({name:o.name,dur:d,shots:o.shots,sell:3,desc:o.type,badges:[{t:"异常",c:"exp"}],logic:o.structure,table:[]}))));
+                  const sideExpandOne=async(o)=>{for(let att=0;att<2;att++){try{const r=await generateJSON({model:"gemini-2.5-pro",system:`你是一位顶级短视频脚本创作者+AI视觉导演，台词100%口语化。脚本将通过AI生图+AI生视频制作。${ipCtx}`,prompt:`展开脚本大纲：\n产品：${p}（${c}）| 时长：${d}\n${prodDesc?"【⚠️产品真实信息—禁止编造】"+prodDesc+"\n":""}\n方案：${o.name}｜${o.type}｜${o.emotion}\n步骤：${o.structure.join("→")}\n${riskRules}\n台词铁律：①100%口语②每句≤15字③自然衔接④开场有钩子抓人⑤字数匹配时长(4-5字/秒)\n\n【最重要】视觉一致性：你必须先设计一个visual_anchor对象，这是保证整个视频视觉统一的关键：\n- character：固定主角外观（性别年龄发型服装配饰，足够具体让AI每次画出同一个人），不需要人物则写"none"\n- setting：固定主场景（所有镜头共享同一空间）\n- product：固定产品外观（极其具体+必须写no text no label no logo）\n- palette：统一摄影风格（Douyin lifestyle vlog aesthetic）\n所有字段必须英文！product必须含"no text no label no logo"！\n\nAI画面铁律：scene是中文画面描述，image_prompt是英文(40-80词)，每个必须以"no text, no words, no labels in image."结尾。\nbadges：2-3个标签，c用conv/exp/auth\nJSON：{"name":"${o.name}","dur":"${d}","shots":${o.shots},"sell":3,"desc":"30字内","badges":[{"t":"标签","c":"conv"}],"visual_anchor":{"character":"English","setting":"English","product":"English with no text no label no logo","palette":"English"},"logic":${JSON.stringify(o.structure)},"table":[{"shot":1,"dur":"3秒","scene":"中文画面","copy":"台词","image_prompt":"English, no text, no words, no labels in image.","risk":false,"intent":"情绪+目的"}]}`,temperature:0.7,maxTokens:6144});if(r?.table?.length>0)return r;if(att===0)await new Promise(r=>setTimeout(r,2000));}catch(e){console.error(`侧边栏方案「${o.name}」失败:`,e);if(att===0)await new Promise(r=>setTimeout(r,2000));}}return null;};
+                  const rawResults=await Promise.all(ol.map(o=>sideExpandOne(o)));
+                  const results=rawResults.filter(r=>r?.table?.length>0);
+                  if(!results.length)throw new Error("所有方案生成失败");
                   setAiScripts(results.map((s,i)=>({...s,id:i+1,badges:s.badges||[],logic:s.logic||[],table:s.table||[],name:s.name||`方案${i+1}`,dur:s.dur||d,shots:s.shots||0,sell:s.sell||0,desc:s.desc||""})));setCs("results");
                 }catch(e){console.error("[侧边栏AI生成失败]",e);setAiScripts([]);setCs("results");setTimeout(()=>alert("AI脚本生成失败："+e.message+"\n\n当前显示的是内置示例脚本。"),300);}
               }}><I.Zap/> 根据对话生成脚本</button>}
