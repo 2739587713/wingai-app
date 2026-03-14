@@ -61,9 +61,23 @@ def cancel_task(task_id: int):
 
 
 def reschedule_task(task_id: int, delay_minutes: int = 5):
-    """Reschedule a task to run after a delay (for retries)."""
+    """Reschedule a task to run after a delay (for retries).
+    Unlike schedule_task, this actually waits the specified delay."""
+    job_id = f"task_{task_id}"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+
     run_at = datetime.now() + timedelta(minutes=delay_minutes)
-    schedule_task(task_id, run_at)
+    log.info(f"Task {task_id} rescheduled to run at {run_at} ({delay_minutes}min delay)")
+    scheduler.add_job(
+        _run_publish,
+        trigger=DateTrigger(run_date=run_at),
+        args=[task_id],
+        id=job_id,
+        replace_existing=True,
+    )
 
 
 def load_pending_tasks():

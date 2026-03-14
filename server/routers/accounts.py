@@ -323,7 +323,20 @@ async def check_login_status(account_id: int, db: Session = Depends(get_db)):
         }
 
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        log.warning(f"[Login] Account {account_id} poll error (may be transient): {e}")
+        # During page navigation (e.g. after QR scan), JS evaluation often fails temporarily.
+        # Return "waiting" instead of "error" to let the frontend keep polling.
+        # Only return error if the session itself is dead.
+        if account_id not in _login_sessions:
+            return {"status": "error", "message": str(e)}
+        # Try a simple connectivity check
+        try:
+            session = _login_sessions[account_id]["session"]
+            await session.evaluate("1+1")
+            # Session is alive, just a transient error during page load
+            return {"status": "waiting", "message": "页面加载中，请稍候..."}
+        except Exception:
+            return {"status": "error", "message": str(e)}
 
 
 @router.post("/{account_id}/cancel-login")

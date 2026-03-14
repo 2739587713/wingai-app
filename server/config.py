@@ -10,10 +10,10 @@ UPLOADS_DIR = DATA_DIR / "uploads"
 OUTPUTS_DIR = BASE_DIR / "outputs"
 BRAND_PROFILES_DIR = BASE_DIR / "brand_profiles"
 
-# ==================== Gemini API ====================
-AI_BASE_URL = "https://api.apiyi.com/v1"
-AI_API_KEY = "sk-QFvD052YMpEvAN3oBc7228BcD24a44FdB9A73f2a62BeDb3b"
-AI_MODEL = "gemini-2.5-flash-preview"
+# ==================== Gemini API (柏拉图中转) ====================
+AI_BASE_URL = "https://api.bltcy.ai/v1"
+AI_API_KEY = "sk-Nv52MunZZDBX0uiDD0RlrDvG9E2OaNlhiiJoTQKDn0Sd5uJe"
+AI_MODEL = "gemini-2.5-flash"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", AI_API_KEY)
 GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", AI_BASE_URL)
@@ -122,8 +122,12 @@ SEEDANCE_DEFAULT_RESOLUTION = os.getenv("SEEDANCE_DEFAULT_RESOLUTION", "1080p")
 SEEDANCE_DEFAULT_CAMERA_FIXED = _env_bool("SEEDANCE_DEFAULT_CAMERA_FIXED", False)
 SEEDANCE_DEFAULT_WATERMARK = _env_bool("SEEDANCE_DEFAULT_WATERMARK", True)
 
+# ==================== 柏拉图API (备选视频生成) ====================
+BLTCY_API_KEY = os.getenv("BLTCY_API_KEY", "sk-Nv52MunZZDBX0uiDD0RlrDvG9E2OaNlhiiJoTQKDn0Sd5uJe")
+BLTCY_BASE_URL = os.getenv("BLTCY_BASE_URL", "https://api.bltcy.ai")
+
 IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", "nanobanana")
-VIDEO_PROVIDER = os.getenv("VIDEO_PROVIDER", "seedance")
+VIDEO_PROVIDER = os.getenv("VIDEO_PROVIDER", "sora2")
 
 # ==================== 漫剧生成配置 ====================
 COMIC_DRAMA_OUTPUT_DIR = OUTPUTS_DIR / "comic_drama"

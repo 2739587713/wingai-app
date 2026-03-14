@@ -295,8 +295,8 @@ VIRAL_SCORE_THRESHOLDS = {
 
 # ==================== AI配置 ====================
 # Gemini配置
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "sk-qnEWMTAuxto2gX0e0629De3d85Cd42559a9752Da1423254b")
-GEMINI_BASE_URL = "https://api.apiyi.com/v1"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "sk-Nv52MunZZDBX0uiDD0RlrDvG9E2OaNlhiiJoTQKDn0Sd5uJe")
+GEMINI_BASE_URL = "https://api.bltcy.ai/v1"
 GEMINI_MODEL = "gemini-2.5-flash"
 
 # ==================== 并发配置 ====================

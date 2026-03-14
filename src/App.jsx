@@ -246,7 +246,9 @@ export default function App(){
   const [schDate,setSchDate]=useState(()=>{const d=new Date();return d.toISOString().slice(0,10)});
   const [schTime,setSchTime]=useState("18:00");
   const [schFiles,setSchFiles]=useState([]);
-  const [schContentType,setSchContentType]=useState("image"); // image/video
+  const [schContentType,setSchContentType]=useState("image"); // image/video/article
+  const [schAuthor,setSchAuthor]=useState(""); // 公众号文章作者
+  const [schWxImgMode,setSchWxImgMode]=useState("cover"); // cover=仅封面 / inline=插入正文
   const [schPlatBtns,setSchPlatBtns]=useState([false,false,false,false]); // 抖快红微
   const [schPublishing,setSchPublishing]=useState(false);
   const [schQrModal,setSchQrModal]=useState(null); // account id or null
@@ -278,8 +280,9 @@ export default function App(){
   useEffect(()=>{if(pg==="schedule")schFetchAll();},[pg,schMonth,schYear]);
   // 抖音/快手视频不需要标题，只需文案；小红书/公众号始终需要标题
   const schNeedTitle=schPlatBtns[2]||schPlatBtns[3]; // 小红书 or 公众号
-  const schDescPlaceholder=!schPlatBtns[2]&&!schPlatBtns[3]&&(schPlatBtns[0]||schPlatBtns[1])?"输入视频文案，可添加 #话题标签 @好友...":"输入正文内容，好的内容是获得流量的关键...";
-  const schDescMax=schPlatBtns[0]&&!schPlatBtns[2]&&!schPlatBtns[3]?2200:1000;
+  const schIsWxArticle=schPlatBtns[3]&&schContentType==="article"; // 微信公众号文章模式
+  const schDescPlaceholder=schIsWxArticle?"输入文章正文，支持多段落排版，图片将根据设置插入正文或仅作为封面...":!schPlatBtns[2]&&!schPlatBtns[3]&&(schPlatBtns[0]||schPlatBtns[1])?"输入视频文案，可添加 #话题标签 @好友...":"输入正文内容，好的内容是获得流量的关键...";
+  const schDescMax=schIsWxArticle?20000:schPlatBtns[0]&&!schPlatBtns[2]&&!schPlatBtns[3]?2200:1000;
   const schCreateTask=async()=>{
     const selPlats=schPlatBtns.map((on,i)=>on?schPlatMap[i]:null).filter(Boolean);
     if(!selPlats.length)return alert("请选择至少一个发布平台");
@@ -294,6 +297,17 @@ export default function App(){
     setSchPublishing(true);
     try{
       const mediaPaths=schFiles.map(f=>f.serverPath).filter(Boolean);
+      // For WeChat article mode: determine cover_path based on image mode
+      let coverPath="";
+      let taskMediaPaths=mediaPaths;
+      if(schIsWxArticle&&mediaPaths.length>0){
+        coverPath=mediaPaths[0]; // First image is always cover
+        if(schWxImgMode==="cover"){
+          // "仅封面" mode: images are only used as cover, not inserted in body
+          taskMediaPaths=mediaPaths; // pass all, backend will use first as cover only
+        }
+        // "inline" mode: backend will use first as cover + rest as inline images
+      }
       for(const aid of schSelAccounts){
         const acct=schAccounts.find(a=>a.id===Number(aid));
         if(!acct){continue;}
@@ -302,10 +316,10 @@ export default function App(){
           account_id:acct.id,platform:acct.platform,content_type:schContentType,title:schTitle,content:schDesc,
           scheduled_at:dt,color:["#3B82F6","#10B981","#7C3AED","#F97316","#F43F5E","#6B7280"][schColor],
           category:["sell","edu","story","daily","hot","other"][schColor],
-          media_paths:mediaPaths,tags:[],
+          media_paths:taskMediaPaths,cover_path:coverPath,tags:[],
         })});
       }
-      setSchModal(false);setSchTitle("");setSchDesc("");setSchFiles([]);setSchContentType("image");setSchSelAccounts([]);
+      setSchModal(false);setSchTitle("");setSchDesc("");setSchFiles([]);setSchContentType("image");setSchSelAccounts([]);setSchAuthor("");setSchWxImgMode("cover");
       schFetchAll();
     }catch(e){alert("创建失败: "+e.message)}
     setSchPublishing(false);
@@ -475,7 +489,7 @@ export default function App(){
       setExtStepIdx(3);setExtInfo("Gemini 分析中，约30-60秒...");
       let analysisText="";for(let i=0;i<Math.min(corpus.length,25);i++){const v=corpus[i];analysisText+="\n[视频"+(i+1)+"] "+v.title+"\n  互动：点赞"+v.digg+" 评论"+v.comment+" 分享"+v.share+"\n";if(v.subtitle)analysisText+="  字幕片段："+v.subtitle+"\n";if(v.tags?.length)analysisText+="  标签："+v.tags.join("、")+"\n";}
       const analyzePrompt="你是顶级短视频内容策略师，专门从真实数据中提炼可复用的脚本模板。\n\n以下是抖音博主「"+extName.trim()+"」（"+(extCat.trim()||"带货/内容创作")+"）的真实视频数据（按互动量从高到低）：\n"+analysisText+"\n\n请基于以上真实数据，深度分析该博主的内容规律，提炼一个极其详细、可直接用于AI生成脚本的模板。\n\n只输出以下JSON，不要任何其他文字：\n{\"name\":\"模板名称（6-12字，体现该博主核心套路）\",\"desc\":\"核心逻辑一句话（20字内）\",\"personality\":\"人设定位\",\"target_audience\":\"目标受众画像\",\"emotion_tone\":\"整体情绪基调\",\"formula\":\"完整脚本公式，每步具体（格式：步骤名称-具体做法(秒数)→...至少6步）\",\"hook_strategy\":\"前3秒留人策略\",\"conflict_setup\":\"如何建立矛盾/痛点\",\"product_intro_style\":\"产品引入方式\",\"trust_mechanism\":\"建立信任的核心机制\",\"price_anchor\":\"价格话术模式\",\"urgency_tactic\":\"制造紧迫感的方式\",\"cta_style\":\"结尾行动引导方式\",\"pacing\":\"节奏描述\",\"sentence_length\":\"句子长短特征\",\"voice_rhythm\":\"语音节奏特征\",\"emotion_curve\":\"情绪曲线\",\"climax_position\":\"高潮点位置\",\"keyword_bank\":[\"12个高频口头禅/话术\"],\"power_words\":[\"8个高转化词汇\"],\"filler_words\":[\"标志性语气词\"],\"sentence_patterns\":[\"8个标志性句式，用【】标注变量\"],\"sample_hooks\":[\"4个开头钩子\"],\"sample_transitions\":[\"3个场景过渡句式\"],\"sample_ctas\":[\"3个结尾引导句式\"],\"viral_patterns\":\"爆款规律\",\"dos\":[\"创作必做5件事\"],\"donts\":[\"创作禁忌5件事\"],\"structure\":[\"步骤1\",\"步骤2\",\"步骤3\",\"步骤4\",\"步骤5\",\"步骤6\"],\"scene\":\"最适合套用此模板的产品类型和场景\",\"tags\":[\"品类标签\",\"风格标签\",\"平台标签\"],\"stat\":\"预估完播率提升\",\"style_summary\":\"综合风格总结（150字）\"}";
-      const resp=await fetch("/api-proxy/v1/chat/completions",{method:"POST",headers:API_HDRS,body:JSON.stringify({model:"gemini-2.5-pro",messages:[{role:"system",content:"你是一位短视频内容模式识别专家。从真实数据中提炼创作模板。只输出JSON。"},{role:"user",content:analyzePrompt}],temperature:0.3,response_format:{type:"json_object"}})});
+      const resp=await fetch("/blt-proxy/v1/chat/completions",{method:"POST",headers:API_HDRS,body:JSON.stringify({model:"gemini-2.5-pro",messages:[{role:"system",content:"你是一位短视频内容模式识别专家。从真实数据中提炼创作模板。只输出JSON。"},{role:"user",content:analyzePrompt}],temperature:0.3,response_format:{type:"json_object"}})});
       const aiData=await resp.json();let raw=aiData.choices?.[0]?.message?.content||"";
       raw=raw.replace(/```json?\s*/g,"").replace(/```\s*$/g,"").trim();
       const jm=raw.match(/\{[\s\S]*\}/);
@@ -488,7 +502,7 @@ export default function App(){
     }catch(e){setExtStep("err:提取失败: "+e.message);setExtBusy(false);}
   };
   // ═══ 统一 LLM 调用 ═══
-  const API_HDRS={"Content-Type":"application/json","Authorization":"Bearer sk-QFvD052YMpEvAN3oBc7228BcD24a44FdB9A73f2a62BeDb3b"};
+  const API_HDRS={"Content-Type":"application/json","Authorization":"Bearer sk-Nv52MunZZDBX0uiDD0RlrDvG9E2OaNlhiiJoTQKDn0Sd5uJe"};
   const callLLM=async({model="gemini-2.5-flash",messages,system,prompt,temperature=0.7,maxTokens=8192,jsonMode=false,retries=2,enableSearch=false})=>{
     const msgs=messages||[...(system?[{role:"system",content:system}]:[]),{role:"user",content:prompt}];
     const body={model,messages:msgs,temperature,max_tokens:maxTokens};
@@ -496,7 +510,7 @@ export default function App(){
     if(enableSearch){body.enable_search=true;body.search_options={search_strategy:"max"};}
     for(let attempt=0;attempt<=retries;attempt++){
       try{
-        const resp=await fetch("/api-proxy/v1/chat/completions",{method:"POST",headers:API_HDRS,body:JSON.stringify(body)});
+        const resp=await fetch("/blt-proxy/v1/chat/completions",{method:"POST",headers:API_HDRS,body:JSON.stringify(body)});
         if(!resp.ok){const t=await resp.text();throw new Error(`API ${resp.status}: ${t.slice(0,200)}`);}
         const data=await resp.json();
         const content=data.choices?.[0]?.message?.content||"";
@@ -596,7 +610,7 @@ export default function App(){
     if(v)setSbVoice(v.id);
   };
   const genOneImage=async(prompt)=>{
-    const r=await fetch("/api-proxy/v1/images/generations",{method:"POST",headers:API_HDRS,body:JSON.stringify({model:"gpt-image-1",prompt,n:1,size:"1024x1536",quality:"high"})});
+    const r=await fetch("/blt-proxy/v1/images/generations",{method:"POST",headers:API_HDRS,body:JSON.stringify({model:"gpt-image-1",prompt,n:1,size:"1024x1536",quality:"high"})});
     if(!r.ok)throw new Error("图片API "+r.status);
     const buf=await r.arrayBuffer();const text=new TextDecoder().decode(buf);const d=JSON.parse(text);
     if(d.error)throw new Error(d.error.message);
@@ -608,13 +622,14 @@ export default function App(){
   // Build visual anchor prefix from adopted script's visual_anchor field
   const getAnchorPrefix=()=>{
     const a=adopted?.visual_anchor;
-    if(!a)return"";
-    const parts=[];
-    if(a.character&&a.character!=="none")parts.push(`[CONSISTENT CHARACTER: ${a.character}]`);
-    if(a.setting)parts.push(`[CONSISTENT SETTING: ${a.setting}]`);
-    if(a.product)parts.push(`[CONSISTENT PRODUCT: ${a.product}]`);
-    if(a.palette)parts.push(`[STYLE: ${a.palette}]`);
-    return parts.length>0?parts.join(" ")+" — ":"";
+    if(!a)return"STRICT RULES: No text, no words, no letters, no labels, no logos, no watermarks anywhere in the image. ";
+    const parts=["STRICT RULES: No text, no words, no letters, no labels, no logos, no watermarks anywhere in the image. This is one frame from a cohesive short video ad."];
+    if(a.character&&a.character!=="none")parts.push(`The same person appears in every shot: ${a.character}.`);
+    if(a.product)parts.push(`The product always looks exactly like this: ${a.product}.`);
+    if(a.setting)parts.push(`Setting: ${a.setting}.`);
+    if(a.palette)parts.push(`Visual style: ${a.palette}.`);
+    parts.push("Douyin/TikTok viral product video aesthetic, iPhone-shot feel, lifestyle commercial, high engagement visual hook.");
+    return parts.join(" ")+"\n\nShot-specific direction: ";
   };
   const generateSbImages=async()=>{
     if(sbShots.length===0)return;
@@ -629,7 +644,7 @@ export default function App(){
         setSbShots(prev=>{const n=[...prev];n[i]={...n[i],status:"generating"};return n;});
         let shotPrompt=sbShots[i].imgPrompt;
         if(!shotPrompt){
-          const raw=await callLLM({model:"gemini-2.5-flash",prompt:`You are a visual prompt engineer. Convert this Chinese scene description into an English image generation prompt for a product video storyboard.\n\nScene: ${sbShots[i].scene}\nProduct: ${prod} (${cat})\nShot type: ${sbShots[i].tag}\nCamera: ${sbShots[i].camera}\nLighting: ${sbShots[i].lighting}\nMood: ${sbShots[i].mood}\n\nIMPORTANT: Only describe the shot-specific framing, angle, action, and composition. Do NOT describe character appearance, clothing, environment details, or overall color palette — those will be provided separately as a consistent visual anchor.\n\nRequirements:\n- English comma-separated phrases\n- Focus on: framing (close-up/medium/wide), camera angle, action/pose, product placement, lens parameters\n- 30-50 English words\n- No real human faces/names\n\nOutput ONLY the prompt text.`,temperature:0.7,maxTokens:200});
+          const raw=await callLLM({model:"gemini-2.5-flash",prompt:`You are a Douyin/TikTok viral video visual director. Convert this Chinese scene description into an English image generation prompt.\n\nScene: ${sbShots[i].scene}\nProduct: ${prod} (${cat})\nShot type: ${sbShots[i].tag}\nCamera: ${sbShots[i].camera}\nLighting: ${sbShots[i].lighting}\nMood: ${sbShots[i].mood}\n\nCRITICAL RULES:\n1. NEVER include any text, words, letters, labels, logos, brand names, or watermarks in the image\n2. Style: Douyin/TikTok viral product video, iPhone-shot aesthetic, lifestyle commercial\n3. If the scene involves a person, describe them from behind, side profile, or show only hands/body parts — avoid detailed faces\n4. Focus on: framing (close-up/medium/wide), camera angle, product placement, lighting mood, lens parameters\n5. Make it look like a real viral short video frame, not a stock photo\n6. 30-50 English words\n\nOutput ONLY the prompt text, nothing else.`,temperature:0.7,maxTokens:200});
           shotPrompt=raw.trim();
         }
         // Combine anchor + shot-specific prompt for visual consistency
@@ -1632,7 +1647,7 @@ JSON输出（严格按此格式，visual_anchor是全局共享的，table数组�
         })
       ));
 
-      setAiScripts(results.map((s,i)=>({...s,id:i+1})));
+      setAiScripts(results.map((s,i)=>({...s,id:i+1,badges:s.badges||[],logic:s.logic||[],table:s.table||[],name:s.name||`方案${i+1}`,dur:s.dur||dur,shots:s.shots||0,sell:s.sell||0,desc:s.desc||""})));
       setCs("results");
     }catch(e){
       console.error("[AI脚本生成失败]",e);
@@ -3452,16 +3467,27 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                 </div>
                 <div className="sch-media-zone">
                   {schContentType==="article"?<>
+                    {/* 公众号文章模式：图片用途选择 */}
+                    {schPlatBtns[3]&&<div style={{display:"flex",gap:8,marginBottom:10}}>
+                      <div style={{flex:1,padding:"8px 12px",borderRadius:8,border:schWxImgMode==="cover"?"2px solid var(--p)":"1.5px solid var(--b2)",cursor:"pointer",background:schWxImgMode==="cover"?"var(--p-bg)":"var(--s1)",transition:"all .15s"}} onClick={()=>setSchWxImgMode("cover")}>
+                        <div style={{fontSize:12,fontWeight:600,color:schWxImgMode==="cover"?"var(--p)":"var(--t1)"}}>仅作封面</div>
+                        <div style={{fontSize:10,color:"var(--t3)",marginTop:2}}>图片仅用作文章封面缩略图，正文为纯文字</div>
+                      </div>
+                      <div style={{flex:1,padding:"8px 12px",borderRadius:8,border:schWxImgMode==="inline"?"2px solid var(--p)":"1.5px solid var(--b2)",cursor:"pointer",background:schWxImgMode==="inline"?"var(--p-bg)":"var(--s1)",transition:"all .15s"}} onClick={()=>setSchWxImgMode("inline")}>
+                        <div style={{fontSize:12,fontWeight:600,color:schWxImgMode==="inline"?"var(--p)":"var(--t1)"}}>插入正文</div>
+                        <div style={{fontSize:10,color:"var(--t3)",marginTop:2}}>首图为封面，其余图片自动插入正文段落间</div>
+                      </div>
+                    </div>}
                     <div className="sch-media-add" onClick={()=>schFileRef.current?.click()}>
                       <I.Plus style={{width:20,height:20}}/>
-                      <span>添加封面图</span>
-                      <span style={{fontSize:9,color:"var(--t3)"}}>可选，jpg/png</span>
-                      <input ref={schFileRef} type="file" accept="image/*" style={{display:"none"}} onChange={schHandleFiles}/>
+                      <span>{schWxImgMode==="inline"?"添加图片（首张为封面）":"添加封面图"}</span>
+                      <span style={{fontSize:9,color:"var(--t3)"}}>{schWxImgMode==="inline"?"可多选，jpg/png":"可选，jpg/png"}</span>
+                      <input ref={schFileRef} type="file" accept="image/*" multiple={schWxImgMode==="inline"} style={{display:"none"}} onChange={schHandleFiles}/>
                     </div>
                     {schFiles.map((f,i)=><div key={i} className="sch-media-item">
                       <img src={f.preview} alt=""/>
                       <div className="sch-media-del" onClick={()=>setSchFiles(schFiles.filter((_,j)=>j!==i))}><I.X style={{width:10,height:10}}/></div>
-                      <div className="sch-media-cover">封面</div>
+                      {i===0?<div className="sch-media-cover">封面</div>:schWxImgMode==="inline"&&<div className="sch-media-cover" style={{background:"rgba(59,130,246,.85)"}}>插图{i}</div>}
                     </div>)}
                   </>:schContentType==="image"?<>
                     <div className="sch-media-add" onClick={()=>schFileRef.current?.click()}>
@@ -3501,8 +3527,12 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                   <input className="sch-inp-title" placeholder="输入吸引人的标题..." value={schTitle} onChange={e=>setSchTitle(e.target.value)} maxLength={tMax}/>
                   <div style={{textAlign:"right",fontSize:10,color:schTitle.length>tMax-2?"var(--r)":"var(--t3)",marginTop:2}}>{schTitle.length}/{tMax}</div>
                 </>;})()}
+                {/* 公众号文章模式：作者输入 */}
+                {schIsWxArticle&&<div style={{marginBottom:10}}>
+                  <input className="sch-inp-title" style={{fontSize:12,padding:"8px 12px"}} placeholder="输入作者名称（可选，默认使用账号昵称）" value={schAuthor} onChange={e=>setSchAuthor(e.target.value)} maxLength={16}/>
+                </div>}
                 {!schNeedTitle&&schPlatBtns.some(Boolean)&&<div style={{fontSize:11,color:"var(--t3)",marginBottom:8,display:"flex",alignItems:"center",gap:4}}><I.Bulb style={{width:12,height:12,color:"var(--p)"}}/> {schPlatBtns[0]?"抖音":"快手"}发布视频无需标题，仅需填写文案描述</div>}
-                <textarea className="sch-inp-content" rows={4} placeholder={schDescPlaceholder} value={schDesc} onChange={e=>setSchDesc(e.target.value)} maxLength={schDescMax}/>
+                <textarea className="sch-inp-content" rows={schIsWxArticle?8:4} placeholder={schDescPlaceholder} value={schDesc} onChange={e=>setSchDesc(e.target.value)} maxLength={schDescMax}/>
                 <div style={{textAlign:"right",fontSize:10,color:schDesc.length>schDescMax*0.9?"var(--r)":"var(--t3)",marginTop:2}}>{schDesc.length}/{schDescMax}</div>
               </div>
               </>:<>
@@ -4121,9 +4151,9 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                 <div key={s.id} className="scd fn">
                   <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:8}}>
                     <div className="scd-n">{s.name}</div>
-                    <div style={{display:"flex",gap:5,flexShrink:0}}>{s.badges.map((b,i)=><span key={i} className={`bd bd-${b.c}`}>{b.t}</span>)}</div>
+                    <div style={{display:"flex",gap:5,flexShrink:0}}>{(s.badges||[]).map((b,i)=><span key={i} className={`bd bd-${b.c}`}>{b.t}</span>)}</div>
                   </div>
-                  <div className="scd-m">预计时长：{s.dur}　镜头数：{s.shots}个　核心卖点：{s.sell}个</div>
+                  <div className="scd-m">预计时长：{s.dur||"--"}　镜头数：{s.shots||0}个　核心卖点：{s.sell||0}个</div>
                   <div className="scd-d">{s.desc}</div>
                   <div style={{display:"flex",justifyContent:"flex-end",marginTop:10}}>
                     <button className="eb" onClick={()=>{setAdopted(s);setCs("detail")}}>展开详情 <I.ChevronR/></button>
@@ -4145,21 +4175,21 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                       <span>⏱ 预计时长：{s.dur}</span><span>🎬 镜头数：{s.shots}个</span><span>⭐ 核心卖点：{s.sell}个</span>
                     </div>
                   </div>
-                  <div style={{display:"flex",gap:5,flexShrink:0}}>{s.badges.map((b,i)=><span key={i} className={`bd bd-${b.c}`}>{b.t}</span>)}</div>
+                  <div style={{display:"flex",gap:5,flexShrink:0}}>{(s.badges||[]).map((b,i)=><span key={i} className={`bd bd-${b.c}`}>{b.t}</span>)}</div>
                 </div>
                 <div style={{fontSize:12,color:"var(--t2)",lineHeight:1.7,padding:"12px 16px",background:"var(--s)",borderRadius:"var(--rl)",border:"1px solid var(--bl)",marginBottom:24}}>
-                  {s.desc}
+                  {s.desc||""}
                 </div>
                 <div className="ds">
                   <div className="dst">创作逻辑推导</div>
-                  {s.logic.map((l,i)=><div key={i} className="li"><div className="ln">{i+1}</div>{l}</div>)}
+                  {(s.logic||[]).map((l,i)=><div key={i} className="li"><div className="ln">{i+1}</div>{l}</div>)}
                 </div>
-                {s.table.length>0&&<div className="ds">
+                {(s.table||[]).length>0&&<div className="ds">
                   <div className="dst">分镜脚本</div>
                   <div style={{overflowX:"auto"}}>
                     <table className="stb">
                       <thead><tr><th>镜头</th><th>时长</th><th>画面描述</th><th>口播台词</th><th>设计意图</th></tr></thead>
-                      <tbody>{s.table.map((r,i)=><tr key={i}>
+                      <tbody>{(s.table||[]).map((r,i)=><tr key={i}>
                         <td style={{fontWeight:600}}>{r.shot}</td><td>{r.dur}</td><td>{r.scene}</td>
                         <td className={r.risk?"rsk":""}>{r.copy}</td><td className="int">{r.intent}</td>
                       </tr>)}</tbody>
@@ -4394,7 +4424,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
                   setAiGenStep(`正在并行创作${ol.length}个脚本...`);
                   const riskRules="禁止极限词(最好用/第一/唯一) | 禁止医疗词 | 敏感肌→敏敏肌 | 美白→提亮肤色";
                   const results=await Promise.all(ol.map(o=>generateJSON({model:"gemini-2.5-pro",system:`你是一位顶级短视频脚本创作者+AI视觉导演，台词100%口语化。脚本将通过AI生图+AI生视频制作。${ipCtx}`,prompt:`展开脚本大纲：\n产品：${p}（${c}）| 时长：${d}\n方案：${o.name}｜${o.type}｜${o.emotion}\n步骤：${o.structure.join("→")}\n${riskRules}\n台词铁律：①100%口语②每句≤15字③自然衔接④开场有钩子抓人⑤字数匹配时长(4-5字/秒)\n\n【最重要】视觉一致性：你必须先设计一个visual_anchor对象，包含character(固定人物外观,英文)、setting(固定场景,英文)、product(固定产品外观,英文)、palette(统一色调和摄影风格,英文)。所有镜头共享同一人物/场景/色调！\n\nAI画面铁律：scene是中文画面描述，image_prompt是英文AI生图提示词(40-80词)，只写该镜头特有的景别/构图/动作/光效，不要重复visual_anchor中的人物/场景/色调(系统会自动拼接)\nbadges：2-3个标签，c用conv/exp/auth\nJSON：{"name":"${o.name}","dur":"${d}","shots":${o.shots},"sell":3,"desc":"一句话概括创意亮点(30字内)","badges":[{"t":"高转化","c":"conv"}],"visual_anchor":{"character":"English description","setting":"English description","product":"English description","palette":"English description"},"logic":${JSON.stringify(o.structure)},"table":[{"shot":1,"dur":"3秒","scene":"中文画面","copy":"旁白台词","image_prompt":"English shot-specific prompt only","risk":false,"intent":"情绪+目的"}]}`,temperature:0.7,maxTokens:6144}).catch(()=>({name:o.name,dur:d,shots:o.shots,sell:3,desc:o.type,badges:[{t:"异常",c:"exp"}],logic:o.structure,table:[]}))));
-                  setAiScripts(results.map((s,i)=>({...s,id:i+1})));setCs("results");
+                  setAiScripts(results.map((s,i)=>({...s,id:i+1,badges:s.badges||[],logic:s.logic||[],table:s.table||[],name:s.name||`方案${i+1}`,dur:s.dur||d,shots:s.shots||0,sell:s.sell||0,desc:s.desc||""})));setCs("results");
                 }catch(e){console.error("[侧边栏AI生成失败]",e);setAiScripts([]);setCs("results");setTimeout(()=>alert("AI脚本生成失败："+e.message+"\n\n当前显示的是内置示例脚本。"),300);}
               }}><I.Zap/> 根据对话生成脚本</button>}
             </div>

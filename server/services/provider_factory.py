@@ -69,10 +69,18 @@ def get_video_client():
     elif provider == "sora2":
         from config import GEMINI_API_KEY, GEMINI_BASE_URL
         from .sora2_video_client import Sora2VideoClient
-        logger.info("使用Sora2图生视频")
+        logger.info("使用Sora2图生视频 (apiyi)")
         return Sora2VideoClient(
             api_key=GEMINI_API_KEY,
             base_url=GEMINI_BASE_URL,
+        )
+    elif provider == "bltcy":
+        from config import BLTCY_API_KEY, BLTCY_BASE_URL
+        from .sora2_video_client import Sora2VideoClient
+        logger.info("使用柏拉图图生视频 (备选)")
+        return Sora2VideoClient(
+            api_key=BLTCY_API_KEY,
+            base_url=BLTCY_BASE_URL,
         )
     else:
         from .image_to_video_client import ImageToVideoClient

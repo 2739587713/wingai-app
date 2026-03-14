@@ -399,7 +399,9 @@ class ScriptCreator:
 
         try:
             result = await self.gemini.generate(prompt)
+            logger.info(f"[快速模式] Gemini原始响应长度: {len(result) if result else 0}")
             parsed = self._parse_json_response(result)
+
             if isinstance(parsed, dict) and "scripts" in parsed:
                 # 验证并修复scripts
                 scripts = parsed["scripts"]
@@ -425,8 +427,36 @@ class ScriptCreator:
                     script["total_duration"] = sum(s.get("duration", 5) for s in shots)
                 logger.info(f"[快速模式] Gemini一次生成{len(scripts)}个完整脚本成功")
                 return parsed
+            elif isinstance(parsed, list) and len(parsed) > 0:
+                # Gemini有时直接返回scripts数组而不是外层对象
+                logger.info(f"[快速模式] Gemini返回了数组格式，自动包装为标准结构")
+                wrapped = {
+                    "competitor_summary": {"winning_patterns": [], "hook_strategies": [], "content_structures": [], "emotional_triggers": []},
+                    "market_summary": {"summary": "", "key_findings": []},
+                    "scripts": parsed
+                }
+                for script in wrapped["scripts"]:
+                    shots = script.get("shots", [])
+                    for i, shot in enumerate(shots):
+                        shot["shot_id"] = i + 1
+                        shot.setdefault("shot_type", "medium")
+                        shot.setdefault("act_type", "main")
+                        shot.setdefault("visual_description", "")
+                        shot.setdefault("narration", "")
+                        shot.setdefault("duration", 5.0)
+                        shot.setdefault("camera_movement", "static")
+                        shot.setdefault("lighting", "natural")
+                        shot.setdefault("mood", "neutral")
+                        shot.setdefault("text_overlay", "")
+                        shot.setdefault("use_product_image", shot["shot_type"] in ("product", "hands_on"))
+                    script["total_duration"] = sum(s.get("duration", 5) for s in shots)
+                return wrapped
+            else:
+                logger.warning(f"[快速模式] Gemini返回了非预期格式: type={type(parsed).__name__}, keys={list(parsed.keys()) if isinstance(parsed, dict) else 'N/A'}")
+                logger.warning(f"[快速模式] 原始响应前500字: {result[:500] if result else 'empty'}")
         except Exception as e:
             logger.warning(f"[快速模式] Gemini生成完整脚本失败，使用fallback: {e}")
+            logger.warning(f"[快速模式] 错误详情: {type(e).__name__}: {e}")
 
         # 回退：生成基础完整脚本
         return self._quick_fallback_scripts(product_name, industry, target_duration, creative_approaches, shot_guides)

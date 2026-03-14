@@ -24,8 +24,8 @@ const I = {
 };
 
 /* ═══ API config ═══ */
-const API_BASE = "/api-proxy/v1";
-const API_KEY = "sk-QFvD052YMpEvAN3oBc7228BcD24a44FdB9A73f2a62BeDb3b";
+const API_BASE = "/blt-proxy/v1";
+const API_KEY = "sk-Nv52MunZZDBX0uiDD0RlrDvG9E2OaNlhiiJoTQKDn0Sd5uJe";
 const hdrs = { "Content-Type": "application/json", Authorization: "Bearer " + API_KEY };
 // 柏拉图 - Kling video + TTS (via proxy to avoid CORS)
 const BLT_BASE = "/blt-proxy";

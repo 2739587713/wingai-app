@@ -108,7 +108,21 @@ def launch_chrome(profile_dir: str | None = None, headless=False) -> tuple[subpr
         args.append("--headless=new")
 
     log.info(f"Launching Chrome on port {port}, profile={profile_dir}")
-    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log.info(f"Chrome executable: {chrome}")
+    log.info(f"Chrome args: {' '.join(args[:5])}...")
+
+    # Remove stale lock files that prevent Chrome/Edge from starting
+    profile_path = Path(profile_dir)
+    for lock_name in ("lockfile", "SingletonLock", "SingletonSocket", "SingletonCookie"):
+        lock_file = profile_path / lock_name
+        if lock_file.exists():
+            try:
+                lock_file.unlink()
+                log.info(f"Removed stale lock file: {lock_file}")
+            except Exception:
+                pass
+
+    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
     # Wait for CDP to be ready
     for i in range(30):
@@ -121,8 +135,15 @@ def launch_chrome(profile_dir: str | None = None, headless=False) -> tuple[subpr
             pass
         time.sleep(0.5)
 
+    # Read stderr for debugging
+    stderr_output = ""
+    try:
+        stderr_output = proc.stderr.read().decode(errors="replace")[:500] if proc.stderr else ""
+    except Exception:
+        pass
     proc.kill()
-    raise RuntimeError(f"Chrome failed to start on port {port}")
+    log.error(f"Chrome stderr: {stderr_output}")
+    raise RuntimeError(f"Chrome failed to start on port {port}. stderr: {stderr_output[:200]}")
 
 
 def get_ws_url(port: int, tab_index=0) -> str:
@@ -140,6 +161,13 @@ def get_ws_url(port: int, tab_index=0) -> str:
     if tab_index >= len(pages):
         tab_index = 0
     return pages[tab_index]["webSocketDebuggerUrl"]
+
+
+def get_all_tabs(port: int) -> list:
+    """Get all page tabs. Returns list of dicts with 'url', 'title', 'webSocketDebuggerUrl'."""
+    r = requests.get(f"http://127.0.0.1:{port}/json", timeout=5, proxies=_no_proxy)
+    tabs = r.json()
+    return [t for t in tabs if t.get("type") == "page"]
 
 
 class CDPSession:

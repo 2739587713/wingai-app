@@ -129,7 +129,11 @@ async def execute_task(task_id: int):
 
         # Execute platform-specific publish
         _log_task(db, task_id, "info", f"Publishing to {task.platform}...")
-        result_url = await driver.publish(session, task)
+        # Pass cdp_port for platforms that need tab switching (e.g. wechat)
+        if task.platform == "wechat":
+            result_url = await driver.publish(session, task, cdp_port=port)
+        else:
+            result_url = await driver.publish(session, task)
 
         # Save fresh cookies after successful publish
         fresh_cookies = await session.get_cookies()
@@ -171,6 +175,11 @@ async def execute_task(task_id: int):
         db.commit()
 
     finally:
+        # On failure, keep browser open briefly so user can see what went wrong
+        # (only if browser actually started successfully)
+        if task and task.status not in ("success", "running") and session and session.ws:
+            log.info(f"Task {task_id} ended with status={task.status}, keeping browser open 30s for debugging")
+            await asyncio.sleep(30)
         if session:
             try:
                 await session.close()

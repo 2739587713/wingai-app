@@ -51,9 +51,9 @@ const thPost = async (ep, body) => {
 };
 
 const callGeminiRaw = async (prompt, temperature = 0.3) => {
-  const resp = await fetch("/api-proxy/v1/chat/completions", {
+  const resp = await fetch("/blt-proxy/v1/chat/completions", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": "Bearer sk-QFvD052YMpEvAN3oBc7228BcD24a44FdB9A73f2a62BeDb3b" },
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer sk-Nv52MunZZDBX0uiDD0RlrDvG9E2OaNlhiiJoTQKDn0Sd5uJe" },
     body: JSON.stringify({ model: "gemini-3.1-pro-preview", messages: [{ role: "user", content: prompt }], temperature }),
   });
   const data = await resp.json();
