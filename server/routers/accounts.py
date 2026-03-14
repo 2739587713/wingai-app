@@ -147,7 +147,7 @@ async def check_login_status(account_id: int, db: Session = Depends(get_db)):
         still_in_login_flow = any(p in url.lower() for p in [
             "/login", "passport.", "sso.", "accounts.google", "signin",
             "verify", "captcha", "sms", "phone", "security_check",
-            "authenticate", "validation",
+            "authenticate", "validation", "scanlogin", "loginpage",
         ])
 
         # Also check page content for verification-related text

@@ -141,3 +141,103 @@ DEFAULT_FPS = 30
 DEFAULT_BITRATE = "5M"
 MAX_CONCURRENT_EXPORTS = 3
 CACHE_TTL = 300
+
+# ==================== 素创API (视频生成多模型) ====================
+SUCHUANG_API_KEY = os.getenv("SUCHUANG_API_KEY", "Q0X6CV17w4th5qwBxxaKAcjatj")
+SUCHUANG_BASE_URL = "https://api.wuyinkeji.com/api"
+
+MAX_CONCURRENT_SUBMISSIONS = 50
+MAX_CONCURRENT_DOWNLOADS = 10
+TASK_POLL_INTERVAL = 15
+TASK_MAX_WAIT_TIME = 600
+
+VIDEO_MODELS = {
+    "sora2-new": {
+        "name": "Sora2 New", "provider": "openai",
+        "endpoint": f"{SUCHUANG_BASE_URL}/sora2-new/submit",
+        "query_endpoint": f"{SUCHUANG_BASE_URL}/sora2-new/detail",
+        "cost_per_video": 2.5, "duration_options": [10, 15],
+        "strengths": ["表情自然", "人物对话", "AI音频"],
+        "best_for": ["talking_head", "scene"], "quality_score": 90, "speed_score": 75,
+    },
+    "sora2-pro": {
+        "name": "Sora2 Pro", "provider": "openai",
+        "endpoint": f"{SUCHUANG_BASE_URL}/sora2-pro/submit",
+        "query_endpoint": f"{SUCHUANG_BASE_URL}/sora2-pro/detail",
+        "cost_per_video": 3.5, "duration_options": [10, 15],
+        "strengths": ["超高质量", "复杂场景"],
+        "best_for": ["product", "effect"], "quality_score": 95, "speed_score": 60,
+    },
+    "veo3": {
+        "name": "Veo 3", "provider": "google",
+        "endpoint": f"{SUCHUANG_BASE_URL}/veo3/submit",
+        "query_endpoint": f"{SUCHUANG_BASE_URL}/veo3/detail",
+        "cost_per_video": 2.0, "duration_options": [8, 12],
+        "strengths": ["4K画质", "高分辨率"],
+        "best_for": ["product", "scene"], "quality_score": 92, "speed_score": 70,
+    },
+    "veo3.1": {
+        "name": "Veo 3.1", "provider": "google",
+        "endpoint": f"{SUCHUANG_BASE_URL}/veo3.1/submit",
+        "query_endpoint": f"{SUCHUANG_BASE_URL}/veo3.1/detail",
+        "cost_per_video": 2.2, "duration_options": [8, 12],
+        "strengths": ["最新版本", "优化画质"],
+        "best_for": ["product", "scene", "effect"], "quality_score": 93, "speed_score": 72,
+    },
+    "veo3.1-pro": {
+        "name": "Veo 3.1 Pro", "provider": "google",
+        "endpoint": f"{SUCHUANG_BASE_URL}/veo3.1-pro/submit",
+        "query_endpoint": f"{SUCHUANG_BASE_URL}/veo3.1-pro/detail",
+        "cost_per_video": 3.0, "duration_options": [8, 12],
+        "strengths": ["顶级画质", "产品细节"],
+        "best_for": ["product", "hands_on"], "quality_score": 96, "speed_score": 65,
+    },
+    "veo3.1-fast": {
+        "name": "Veo 3.1 Fast", "provider": "google",
+        "endpoint": f"{SUCHUANG_BASE_URL}/veo3.1-fast/submit",
+        "query_endpoint": f"{SUCHUANG_BASE_URL}/veo3.1-fast/detail",
+        "cost_per_video": 1.5, "duration_options": [8, 12],
+        "strengths": ["生成快速", "成本低"],
+        "best_for": ["scene", "transition"], "quality_score": 85, "speed_score": 95,
+    },
+    "jimeng": {
+        "name": "即梦AI", "provider": "bytedance",
+        "endpoint": f"{SUCHUANG_BASE_URL}/jimeng/submit",
+        "query_endpoint": f"{SUCHUANG_BASE_URL}/jimeng/detail",
+        "cost_per_video": 1.8, "duration_options": [10, 15],
+        "strengths": ["中文场景", "本土化"],
+        "best_for": ["talking_head", "scene"], "quality_score": 88, "speed_score": 80,
+    },
+    "runway": {
+        "name": "Runway Gen-3", "provider": "runway",
+        "endpoint": f"{SUCHUANG_BASE_URL}/runway/submit",
+        "query_endpoint": f"{SUCHUANG_BASE_URL}/runway/detail",
+        "cost_per_video": 2.8, "duration_options": [10, 15],
+        "strengths": ["专业后期", "特效"],
+        "best_for": ["effect", "transition"], "quality_score": 91, "speed_score": 68,
+    },
+    "kling": {
+        "name": "可灵 Kling", "provider": "kuaishou",
+        "endpoint": f"{SUCHUANG_BASE_URL}/kling/submit",
+        "query_endpoint": f"{SUCHUANG_BASE_URL}/kling/detail",
+        "cost_per_video": 2.0, "duration_options": [10, 15],
+        "strengths": ["高帧率", "1080p@30fps"],
+        "best_for": ["hands_on", "scene"], "quality_score": 89, "speed_score": 77,
+    },
+    "vidu": {
+        "name": "Vidu AI", "provider": "shengsu",
+        "endpoint": f"{SUCHUANG_BASE_URL}/vidu/submit",
+        "query_endpoint": f"{SUCHUANG_BASE_URL}/vidu/detail",
+        "cost_per_video": 1.6, "duration_options": [8, 12],
+        "strengths": ["性价比高", "稳定"],
+        "best_for": ["scene", "talking_head"], "quality_score": 86, "speed_score": 82,
+    },
+    "pixverse": {
+        "name": "PixVerse", "provider": "pixverse",
+        "endpoint": f"{SUCHUANG_BASE_URL}/pixverse/submit",
+        "query_endpoint": f"{SUCHUANG_BASE_URL}/pixverse/detail",
+        "cost_per_video": 1.2, "duration_options": [8, 12],
+        "strengths": ["超低成本", "快速"],
+        "best_for": ["transition", "scene"], "quality_score": 80, "speed_score": 90,
+    },
+}
