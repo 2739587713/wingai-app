@@ -211,6 +211,140 @@ async def _add_tags(session, tags: list):
             log.warning(f"[XHS] Failed to add tag '#{tag_name}': {e}")
 
 
+async def _set_scheduled_time(session, scheduled_at):
+    """Set scheduled publish time on Xiaohongshu (定时发布)."""
+    from datetime import datetime
+    if isinstance(scheduled_at, str):
+        scheduled_at = datetime.fromisoformat(scheduled_at)
+
+    now = datetime.now()
+    diff = (scheduled_at - now).total_seconds()
+    if diff < 120:  # Less than 2 min, platform can't handle
+        log.info("[XHS] Scheduled time is too soon (<2min), will publish immediately")
+        return
+    if diff > 14 * 86400:
+        log.warning("[XHS] Scheduled time >14 days. Publishing immediately.")
+        return
+
+    date_str = scheduled_at.strftime("%Y-%m-%d")
+    time_str = scheduled_at.strftime("%H:%M")
+    dt_str = f"{date_str} {time_str}"
+    log.info(f"[XHS] Setting 定时发布: {dt_str}")
+
+    # Step 1: Find and click 定时发布 toggle
+    clicked = await session.evaluate("""
+        (() => {
+            const els = document.querySelectorAll('span, div, label, p, button');
+            for (const el of els) {
+                const text = (el.textContent || '').trim();
+                if (text === '定时发布' || text === '设置定时发布') {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width > 20 && rect.height > 10) {
+                        // Try to find a toggle/switch near it
+                        const parent = el.closest('div[class]') || el.parentElement;
+                        const toggle = parent ? parent.querySelector(
+                            'input[type="checkbox"], [role="switch"], [class*="switch"], [class*="toggle"]'
+                        ) : null;
+                        if (toggle) { toggle.click(); return 'clicked toggle'; }
+                        el.click();
+                        return 'clicked:' + text.substring(0, 20);
+                    }
+                }
+            }
+            return null;
+        })()
+    """)
+    if clicked:
+        log.info(f"[XHS] Schedule toggle: {clicked}")
+        await asyncio.sleep(1.5)
+    else:
+        # AI vision fallback — reuse publish button detection pattern
+        log.info("[XHS] Using AI to find 定时发布 toggle")
+        ai_clicked = await find_and_click(
+            session,
+            '在页面底部找到"定时发布"的开关按钮、切换按钮或单选按钮并点击开启。'
+            '它通常在"发布"按钮附近，可能是一个滑动开关(switch)或可点击的选项。'
+        )
+        if ai_clicked:
+            await asyncio.sleep(1.5)
+        else:
+            log.warning("[XHS] Could not find 定时发布 toggle, publishing immediately")
+            return
+
+    # Step 2: Set date/time in the picker
+    # Try JS first
+    date_set = await session.evaluate(f"""
+        (() => {{
+            const inputs = document.querySelectorAll(
+                'input[type="text"], input[type="date"], input[type="datetime-local"], '
+                + 'input[placeholder*="日期"], input[placeholder*="选择"], '
+                + '.el-input input, [class*="picker"] input, [class*="date"] input'
+            );
+            for (const inp of inputs) {{
+                const rect = inp.getBoundingClientRect();
+                if (rect.width > 50 && rect.height > 20 && rect.top > 0) {{
+                    inp.focus();
+                    inp.click();
+                    const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+                    if (proto && proto.set) {{
+                        proto.set.call(inp, '{dt_str}');
+                    }} else {{
+                        inp.value = '{dt_str}';
+                    }}
+                    inp.dispatchEvent(new Event('input', {{bubbles: true}}));
+                    inp.dispatchEvent(new Event('change', {{bubbles: true}}));
+                    return 'set via input';
+                }}
+            }}
+            return false;
+        }})()
+    """)
+
+    if date_set:
+        log.info(f"[XHS] Schedule date/time set via JS: {dt_str}")
+        await asyncio.sleep(1)
+    else:
+        # AI vision fallback
+        log.info(f"[XHS] Using AI to set date/time: {dt_str}")
+        ai_clicked = await find_and_click(
+            session,
+            f'找到定时发布下方的日期时间输入框或日历选择器并点击。'
+            f'需要设置的日期是{date_str}，时间是{time_str}。'
+        )
+        if ai_clicked:
+            await asyncio.sleep(1)
+            await session.evaluate("document.execCommand('selectAll')")
+            await asyncio.sleep(0.2)
+            for char in dt_str:
+                await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(char)})")
+                await asyncio.sleep(0.05)
+            await asyncio.sleep(1)
+
+    # Confirm/close the picker if needed
+    await session.evaluate("""
+        (() => {
+            const btns = document.querySelectorAll('button, span, a');
+            for (const btn of btns) {
+                const t = (btn.textContent || '').trim();
+                if ((t === '确定' || t === '确认') && btn.offsetParent !== null) {
+                    btn.click(); return;
+                }
+            }
+            document.body.click();
+        })()
+    """)
+    await asyncio.sleep(1)
+
+    # Step 3: Verify
+    verify = await get_page_analysis(
+        session,
+        '请检查页面上"定时发布"是否已开启，日期时间是否已设置。'
+        '只回答JSON: {"enabled": true/false, "time_set": true/false, "description": "简要描述"}'
+    )
+    log.info(f"[XHS] Schedule verification: {verify[:200]}")
+    log.info("[XHS] Scheduled time configured")
+
+
 async def _click_publish(session):
     """Click the red 发布 button at the bottom."""
     # Method 1: JS text match
@@ -313,6 +447,12 @@ async def publish(session, task) -> str:
         await _add_tags(session, tags)
 
     await delay(1, 2)
+
+    # 6.5. Set scheduled time if needed
+    scheduled_at = getattr(task, "scheduled_at", None)
+    if scheduled_at:
+        await _set_scheduled_time(session, scheduled_at)
+        await delay(1, 2)
 
     # 7. Click publish
     log.info("[XHS] Clicking publish button")

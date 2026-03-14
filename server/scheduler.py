@@ -23,7 +23,9 @@ async def _run_publish(task_id: int):
 
 
 def schedule_task(task_id: int, run_at: datetime):
-    """Register a task to run at a specific time (local time)."""
+    """Register a task to run immediately.
+    The platform's built-in scheduled publish feature will handle the actual timing.
+    We always execute right away so the browser uploads and configures 定时发布 on the platform."""
     job_id = f"task_{task_id}"
     # Remove existing job if any
     try:
@@ -31,33 +33,22 @@ def schedule_task(task_id: int, run_at: datetime):
     except Exception:
         pass
 
+    # Always run immediately — the platform driver will set 定时发布 if scheduled_at is in the future
+    log.info(f"Task {task_id} scheduled_at={run_at}, executing now (platform will handle timing)")
     now = datetime.now()
-    if run_at <= now:
-        # Already past due — run immediately via the event loop
-        log.info(f"Task {task_id} is past due, running now")
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(_run_publish(task_id))
-        except RuntimeError:
-            # No running loop yet (e.g. during startup) — schedule 2s from now
-            run_at = now + timedelta(seconds=2)
-            scheduler.add_job(
-                _run_publish,
-                trigger=DateTrigger(run_date=run_at),
-                args=[task_id],
-                id=job_id,
-                replace_existing=True,
-            )
-        return
-
-    scheduler.add_job(
-        _run_publish,
-        trigger=DateTrigger(run_date=run_at),
-        args=[task_id],
-        id=job_id,
-        replace_existing=True,
-    )
-    log.info(f"Scheduled task {task_id} for {run_at}")
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_run_publish(task_id))
+    except RuntimeError:
+        # No running loop yet (e.g. during startup) — schedule 2s from now
+        exec_at = now + timedelta(seconds=2)
+        scheduler.add_job(
+            _run_publish,
+            trigger=DateTrigger(run_date=exec_at),
+            args=[task_id],
+            id=job_id,
+            replace_existing=True,
+        )
 
 
 def cancel_task(task_id: int):

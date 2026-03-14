@@ -55,7 +55,7 @@ def create_account(data: AccountCreate, db: Session = Depends(get_db)):
         profile_dir=profile_dir,
         wx_appid=data.wx_appid,
         wx_secret=data.wx_secret,
-        status="active" if data.platform == "wechat" and data.wx_appid else "login_required",
+        status="login_required",
     )
     db.add(acct)
     db.commit()
@@ -79,9 +79,6 @@ async def start_login(account_id: int, db: Session = Depends(get_db)):
     acct = db.query(Account).get(account_id)
     if not acct:
         raise HTTPException(404, "Account not found")
-
-    if acct.platform == "wechat":
-        raise HTTPException(400, "WeChat uses API key, not QR login")
 
     urls = PLATFORM_URLS.get(acct.platform)
     if not urls:
@@ -183,6 +180,8 @@ async def check_login_status(account_id: int, db: Session = Depends(get_db)):
             "cp.kuaishou.com/article",
             "cp.kuaishou.com/profile",
             "cp.kuaishou.com/",
+            "mp.weixin.qq.com/cgi-bin/home",
+            "mp.weixin.qq.com/",
         ])
         if url.rstrip("/") == "https://creator.douyin.com":
             is_creator_page = True
@@ -190,7 +189,7 @@ async def check_login_status(account_id: int, db: Session = Depends(get_db)):
         # Check for avatar/user elements as strong login signal
         has_user_element = await session.evaluate("""
             (() => {
-                const el = document.querySelector('img[class*="avatar"], .user-name, .nick-name, [class*="nickname"], [class*="user-info"]');
+                const el = document.querySelector('img[class*="avatar"], .user-name, .nick-name, [class*="nickname"], [class*="user-info"], .weui-desktop-account__thumb, .head_img');
                 return !!el;
             })()
         """)

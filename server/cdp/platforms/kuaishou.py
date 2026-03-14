@@ -277,64 +277,114 @@ async def publish(session, task) -> str:
         sched = task.scheduled_at if isinstance(task.scheduled_at, datetime) else datetime.fromisoformat(str(task.scheduled_at).replace("Z", "+00:00"))
         diff = (sched - now).total_seconds()
 
-        if diff > 600:
-            log.info(f"[KS] Setting 定时发布 ({diff/60:.0f}min ahead)")
-            dt_str = sched.strftime("%Y-%m-%d %H:%M:%S")
+        if diff > 120:  # At least 2 min in the future
+            if diff > 14 * 86400:
+                log.warning("[KS] Scheduled time >14 days, publishing immediately")
+            else:
+                log.info(f"[KS] Setting 定时发布 ({diff/60:.0f}min ahead)")
+                date_str = sched.strftime("%Y-%m-%d")
+                time_str = sched.strftime("%H:%M")
+                dt_str = sched.strftime("%Y-%m-%d %H:%M:%S")
 
-            # Click 定时发布 radio (the 2nd radio under 发布时间)
-            await session.evaluate("""
-                (() => {
-                    const wrappers = document.querySelectorAll('.ant-radio-wrapper');
-                    for (const w of wrappers) {
-                        if ((w.textContent || '').includes('定时发布')) {
-                            const inp = w.querySelector('.ant-radio-input, input');
-                            if (inp) inp.click(); else w.click();
-                            return;
+                # Click 定时发布 radio
+                clicked_radio = await session.evaluate("""
+                    (() => {
+                        const wrappers = document.querySelectorAll('.ant-radio-wrapper, span, div, label');
+                        for (const w of wrappers) {
+                            const text = (w.textContent || '').trim();
+                            if (text === '定时发布' || text.includes('定时发布')) {
+                                const inp = w.querySelector('.ant-radio-input, input[type="radio"], input');
+                                if (inp) { inp.click(); return 'clicked radio'; }
+                                w.click();
+                                return 'clicked wrapper';
+                            }
                         }
-                    }
-                })()
-            """)
-            await asyncio.sleep(1)
+                        return false;
+                    })()
+                """)
+                if clicked_radio:
+                    log.info(f"[KS] Schedule toggle: {clicked_radio}")
+                else:
+                    # AI vision fallback
+                    log.info("[KS] Using AI to find 定时发布")
+                    ai_clicked = await find_and_click(
+                        session,
+                        '在页面底部找到"定时发布"的单选按钮(radio button)并点击选择。'
+                        '它通常与"立即发布"选项并列，在"发布"按钮的上方。'
+                    )
+                    if not ai_clicked:
+                        log.warning("[KS] Could not find 定时发布, publishing immediately")
+                await asyncio.sleep(1.5)
 
-            # Fill the date picker — click to open, set value, then CLOSE the picker
-            await session.evaluate("""
-                (() => {
-                    const dtStr = """ + json.dumps(dt_str) + """;
-                    const inp = document.querySelector('.ant-picker input');
-                    if (inp) {
-                        inp.focus(); inp.click();
-                        const s = Object.getOwnPropertyDescriptor(
-                            window.HTMLInputElement.prototype, 'value'
-                        ).set;
-                        s.call(inp, dtStr);
-                        inp.dispatchEvent(new Event('input', { bubbles: true }));
-                        inp.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                })()
-            """)
-            await asyncio.sleep(1)
-
-            # Click "确定" button inside the picker popup to confirm and close it
-            await session.evaluate("""
-                (() => {
-                    // Find the OK/确定 button in the ant-picker dropdown
-                    const btns = document.querySelectorAll('.ant-picker-ok button, .ant-btn-primary, .ant-btn-sm');
-                    for (const btn of btns) {
-                        const t = (btn.textContent || '').trim();
-                        if (t === '确定' && btn.offsetParent !== null) {
-                            btn.click();
-                            return;
+                # Fill the date picker — try JS first, AI vision fallback
+                picker_filled = await session.evaluate("""
+                    (() => {
+                        const dtStr = """ + json.dumps(dt_str) + """;
+                        const inputs = document.querySelectorAll(
+                            '.ant-picker input, [class*="picker"] input, '
+                            + 'input[type="text"][placeholder*="日期"], input[placeholder*="选择"]'
+                        );
+                        for (const inp of inputs) {
+                            const rect = inp.getBoundingClientRect();
+                            if (rect.width > 50 && rect.height > 20 && rect.top > 0) {
+                                inp.focus(); inp.click();
+                                const s = Object.getOwnPropertyDescriptor(
+                                    window.HTMLInputElement.prototype, 'value'
+                                );
+                                if (s && s.set) { s.set.call(inp, dtStr); }
+                                else { inp.value = dtStr; }
+                                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                                return 'set via input';
+                            }
                         }
-                    }
-                    // Fallback: click body to close any open dropdown
-                    document.body.click();
-                })()
-            """)
-            await asyncio.sleep(1)
+                        return false;
+                    })()
+                """)
+                if picker_filled:
+                    log.info(f"[KS] Date/time set via JS: {dt_str}")
+                else:
+                    log.info("[KS] Using AI to set date/time")
+                    ai_clicked = await find_and_click(
+                        session,
+                        f'找到定时发布下方出现的日期时间选择器/输入框并点击。'
+                        f'需要设置日期为{date_str}，时间为{time_str}。'
+                    )
+                    if ai_clicked:
+                        await asyncio.sleep(0.5)
+                        await session.evaluate("document.execCommand('selectAll')")
+                        await asyncio.sleep(0.2)
+                        for char in dt_str:
+                            await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(char)})")
+                            await asyncio.sleep(0.05)
+                await asyncio.sleep(1)
 
-            # Make sure the picker popup is closed by clicking page body
-            await session.evaluate("document.querySelector('h2, h1, .ant-layout-content, body').click()")
-            await asyncio.sleep(0.5)
+                # Close the picker popup — click 确定 or click away
+                await session.evaluate("""
+                    (() => {
+                        const btns = document.querySelectorAll('.ant-picker-ok button, .ant-btn-primary, .ant-btn-sm, button');
+                        for (const btn of btns) {
+                            const t = (btn.textContent || '').trim();
+                            if (t === '确定' && btn.offsetParent !== null) {
+                                btn.click(); return;
+                            }
+                        }
+                        document.body.click();
+                    })()
+                """)
+                await asyncio.sleep(1)
+                await session.evaluate("document.body.click()")
+                await asyncio.sleep(0.5)
+
+                # Verify
+                verify = await get_page_analysis(
+                    session,
+                    '请检查"定时发布"是否已选中，日期时间是否已填入。简要回答。'
+                )
+                log.info(f"[KS] Schedule verification: {verify[:150]}")
+                log.info(f"[KS] 定时发布 set to {dt_str}")
+        else:
+            log.info("[KS] Scheduled time too soon (<2min), publishing immediately")
 
     # ── Step 6: Click 发布 button (red button at bottom) ──
     # Scroll ALL scrollable containers to bottom

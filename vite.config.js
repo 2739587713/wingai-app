@@ -388,6 +388,18 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/schedule-api/, '')
       },
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/videos': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/comic-drama': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
       '/suchuang-proxy': {
         target: 'https://api.wuyinkeji.com',
         changeOrigin: true,

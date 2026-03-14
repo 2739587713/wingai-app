@@ -82,4 +82,34 @@ SELECTORS = {
         '[class*="user-name"]',
         '[class*="快手用户"]',
     ],
+
+    # ─── WeChat Official Account (mp.weixin.qq.com) ───
+    "wx_upload_input": [
+        'input[type="file"]',
+        'input[accept*="image"]',
+        'input[accept*="video"]',
+    ],
+    "wx_title_input": [
+        '#title',
+        '[placeholder*="请在这里输入标题"]',
+        '[placeholder*="输入标题"]',
+        '.title_editor [contenteditable="true"]',
+        '[class*="title"] [contenteditable="true"]',
+    ],
+    "wx_content_editor": [
+        '#edui1_contentplaceholder + div [contenteditable="true"]',
+        '#js_editor [contenteditable="true"]',
+        '.edui-body-container',
+        '[contenteditable="true"]',
+    ],
+    "wx_desc_input": [
+        'textarea[placeholder*="填写描述"]',
+        'textarea[placeholder*="描述信息"]',
+        'textarea[placeholder*="描述"]',
+    ],
+    "wx_login_check": [
+        '.weui-desktop-account__thumb',
+        '.head_img',
+        'img[class*="avatar"]',
+    ],
 }

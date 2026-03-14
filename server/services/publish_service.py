@@ -61,17 +61,6 @@ async def execute_task(task_id: int):
         if not driver:
             raise ValueError(f"Unknown platform: {task.platform}")
 
-        # WeChat uses HTTP API, no browser needed
-        if task.platform == "wechat":
-            _log_task(db, task_id, "info", "Using WeChat MP API (no browser)")
-            result_url = await wechat.publish(None, task, account)
-            task.status = "success"
-            task.publish_url = result_url
-            task.updated_at = datetime.now()
-            db.commit()
-            _log_task(db, task_id, "info", f"Published successfully: {result_url}")
-            return
-
         # CDP-based platforms: close any active login session for this account first
         try:
             from routers.accounts import _login_sessions
@@ -95,7 +84,7 @@ async def execute_task(task_id: int):
         ws_url = get_ws_url(port)
         session = CDPSession()
         await session.connect(ws_url)
-        await session.minimize_window()  # Keep window out of the way
+        # Don't minimize — user may need to interact (e.g. SMS verification on Douyin)
         _log_task(db, task_id, "info", "Browser connected")
 
         # Restore cookies: navigate to domain FIRST, then inject cookies, then refresh
@@ -106,6 +95,7 @@ async def execute_task(task_id: int):
                 "douyin": "https://creator.douyin.com",
                 "xiaohongshu": "https://creator.xiaohongshu.com",
                 "kuaishou": "https://cp.kuaishou.com",
+                "wechat": "https://mp.weixin.qq.com",
             }
             domain_url = domain_urls.get(task.platform)
             if domain_url:

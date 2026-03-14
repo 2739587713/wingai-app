@@ -230,9 +230,9 @@ async def _fill_title(session, title: str):
     clicked = await find_and_click(session, '找到"填写作品标题"的输入框并点击')
     if clicked:
         await asyncio.sleep(0.5)
-        for char in truncated:
-            await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(char)})")
-            await asyncio.sleep(0.03)
+        # Insert full text at once to avoid race conditions with char-by-char input
+        await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(truncated)})")
+        await asyncio.sleep(0.3)
         log.info("[DY] Title typed via AI vision")
 
 
@@ -251,9 +251,9 @@ async def _fill_content(session, content: str):
             }})()
         """)
         await asyncio.sleep(0.3)
-        for char in truncated:
-            await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(char)})")
-            await asyncio.sleep(0.02)
+        # Insert full text at once to avoid race conditions
+        await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(truncated)})")
+        await asyncio.sleep(0.5)
         log.info(f"[DY] Content typed ({len(truncated)} chars)")
         return
 
@@ -267,9 +267,9 @@ async def _fill_content(session, content: str):
     """)
     if ace_found:
         await asyncio.sleep(0.3)
-        for char in truncated:
-            await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(char)})")
-            await asyncio.sleep(0.02)
+        # Insert full text at once to avoid race conditions
+        await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(truncated)})")
+        await asyncio.sleep(0.5)
         log.info(f"[DY] Content typed via .ace-line ({len(truncated)} chars)")
         return
 
@@ -277,9 +277,9 @@ async def _fill_content(session, content: str):
     clicked = await find_and_click(session, '找到"添加作品简介"或"作品描述"的文本编辑区域并点击')
     if clicked:
         await asyncio.sleep(0.5)
-        for char in truncated:
-            await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(char)})")
-            await asyncio.sleep(0.02)
+        # Insert full text at once to avoid race conditions
+        await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(truncated)})")
+        await asyncio.sleep(0.5)
         log.info("[DY] Content typed via AI vision")
 
 
@@ -310,38 +310,63 @@ async def _set_scheduled_time(session, scheduled_at):
     """Set Douyin's built-in scheduled publish time (定时发布). Max 14 days ahead."""
     from datetime import datetime, timedelta
 
-    # Parse scheduled_at
     if isinstance(scheduled_at, str):
         scheduled_at = datetime.fromisoformat(scheduled_at)
 
     now = datetime.now()
-    # Only set scheduled time if it's in the future (> 10 min from now) and within 14 days
     diff = (scheduled_at - now).total_seconds()
-    if diff < 600:  # Less than 10 min away, just publish immediately
-        log.info("[DY] Scheduled time is too soon, will publish immediately")
+    if diff < 120:  # Less than 2 min away, platform can't handle
+        log.info("[DY] Scheduled time is too soon (<2min), will publish immediately")
         return
-    if diff > 14 * 86400:  # More than 14 days
-        log.warning("[DY] Scheduled time is more than 14 days away, Douyin max is 14 days. Publishing immediately.")
+    if diff > 14 * 86400:
+        log.warning("[DY] Scheduled time >14 days, Douyin max is 14 days. Publishing immediately.")
         return
 
     log.info(f"[DY] Setting scheduled publish time: {scheduled_at}")
     await _scroll_to_bottom(session)
     await asyncio.sleep(1)
 
-    # Step 1: Find and click "定时发布" toggle/switch
+    # Step 1: Find and click "定时发布" radio/toggle
+    # Douyin uses radio buttons: ● 立即发布  ○ 定时发布
     clicked_toggle = await session.evaluate("""
         (() => {
-            const els = document.querySelectorAll('span, div, label, p');
-            for (const el of els) {
+            // Method 1: Find all radio-like elements containing "定时发布"
+            // Douyin uses Semi Design radio: label.semi-radio > input.semi-radio-inner-input + span
+            const allEls = document.querySelectorAll('label, span, div, p');
+            for (const el of allEls) {
                 const text = el.textContent.trim();
-                if (text === '定时发布' || text === '设置定时发布') {
-                    // Find the toggle/switch near it
-                    const parent = el.closest('div[class]') || el.parentElement;
-                    const toggle = parent ? parent.querySelector('input[type="checkbox"], [role="switch"], [class*="switch"], [class*="toggle"]') : null;
-                    if (toggle) { toggle.click(); return 'clicked toggle'; }
-                    // Try clicking the text/parent itself
+                if (text === '定时发布') {
+                    // Try clicking the parent radio label (Semi Design pattern)
+                    const radioLabel = el.closest('label[class*="radio"], [class*="radio-wrapper"], label');
+                    if (radioLabel) {
+                        const radioInput = radioLabel.querySelector('input[type="radio"], [class*="radio-inner"]');
+                        if (radioInput) { radioInput.click(); return 'clicked radio input in label'; }
+                        radioLabel.click();
+                        return 'clicked radio label';
+                    }
+                    // Try finding radio input in parent container
+                    const parent = el.parentElement;
+                    if (parent) {
+                        const radio = parent.querySelector('input[type="radio"], [class*="radio-input"], [class*="semi-radio"]');
+                        if (radio) { radio.click(); return 'clicked radio in parent'; }
+                        parent.click();
+                        return 'clicked parent of 定时发布';
+                    }
                     el.click();
-                    return 'clicked text';
+                    return 'clicked text directly';
+                }
+            }
+            // Method 2: Search radio groups for second option (定时发布 is typically the 2nd radio)
+            const radioGroups = document.querySelectorAll('[class*="radio-group"], [role="radiogroup"]');
+            for (const group of radioGroups) {
+                const radios = group.querySelectorAll('label, [class*="radio-wrapper"]');
+                for (const r of radios) {
+                    if (r.textContent.includes('定时发布')) {
+                        const inp = r.querySelector('input');
+                        if (inp) { inp.click(); return 'clicked radio in group'; }
+                        r.click();
+                        return 'clicked radio wrapper in group';
+                    }
                 }
             }
             return false;
@@ -349,53 +374,177 @@ async def _set_scheduled_time(session, scheduled_at):
     """)
     if clicked_toggle:
         log.info(f"[DY] Schedule toggle: {clicked_toggle}")
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(2)
     else:
-        # AI fallback
-        log.info("[DY] Using AI to find schedule toggle")
-        ai_clicked = await find_and_click(session, '找到"定时发布"的开关/切换按钮并点击开启')
+        # AI vision fallback
+        log.info("[DY] Using AI to find 定时发布 radio button")
+        await _save_debug_screenshot(session, "before_schedule_toggle")
+        ai_clicked = await find_and_click(
+            session,
+            '在"发布设置"区域的"发布时间"一行中，找到"定时发布"旁边的圆形单选按钮(radio button)并点击。'
+            '当前"立即发布"被选中（红色圆点），需要点击右边"定时发布"前面的空心圆圈来切换。'
+        )
         if ai_clicked:
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(2)
         else:
-            log.warning("[DY] Could not find scheduled publish toggle, will publish immediately")
+            log.warning("[DY] Could not find 定时发布 radio, will publish immediately")
             return
 
-    # Step 2: Set date and time
+    await _save_debug_screenshot(session, "after_schedule_toggle")
+
+    # Step 2: Set date and time in the picker that appeared after clicking 定时发布
     date_str = scheduled_at.strftime("%Y-%m-%d")
     time_str = scheduled_at.strftime("%H:%M")
+    dt_str = f"{date_str} {time_str}"
 
-    # Try to find date/time input fields that appeared after toggling
-    date_set = await session.evaluate(f"""
-        (() => {{
-            // Look for date picker input
-            const inputs = document.querySelectorAll('input[type="text"], input[type="date"], input[placeholder*="日期"], input[placeholder*="选择"]');
-            for (const inp of inputs) {{
-                const rect = inp.getBoundingClientRect();
-                if (rect.width > 50 && rect.height > 20) {{
-                    // Try React-compatible value setting
+    # After clicking 定时发布 radio, a DatePicker should appear
+    # Douyin uses Semi Design DatePicker — it renders an input inside a .semi-datepicker
+    # First, click the date picker input to open the calendar popup
+    picker_clicked = await session.evaluate("""
+        (() => {
+            // Find the date picker input that appeared after toggling 定时发布
+            const selectors = [
+                '.semi-datepicker input',
+                '.semi-datepicker-input',
+                '[class*="datepicker"] input',
+                '[class*="date-picker"] input',
+                '[class*="scheduled"] input',
+                'input[placeholder*="日期"]',
+                'input[placeholder*="选择时间"]',
+                'input[placeholder*="请选择"]',
+            ];
+            for (const sel of selectors) {
+                const inp = document.querySelector(sel);
+                if (inp && inp.offsetParent !== null) {
+                    inp.focus();
+                    inp.click();
+                    return 'clicked:' + sel;
+                }
+            }
+            // Fallback: find any new input near "发布时间" row
+            const labels = document.querySelectorAll('span, div, label');
+            for (const lbl of labels) {
+                if (lbl.textContent.trim() === '发布时间') {
+                    const row = lbl.closest('div[class]') || lbl.parentElement;
+                    if (row) {
+                        const inp = row.querySelector('input');
+                        if (inp) { inp.focus(); inp.click(); return 'clicked input near label'; }
+                    }
+                }
+            }
+            return false;
+        })()
+    """)
+
+    if picker_clicked:
+        log.info(f"[DY] Date picker opened: {picker_clicked}")
+        await asyncio.sleep(1)
+
+        # Now the calendar popup should be open. Clear and type the date/time.
+        typed = await session.evaluate(f"""
+            (() => {{
+                // Find the focused/active input in the picker
+                const inp = document.activeElement;
+                if (inp && inp.tagName === 'INPUT') {{
+                    // Use React-compatible setter
                     const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
                     if (proto && proto.set) {{
-                        proto.set.call(inp, '{date_str} {time_str}');
+                        proto.set.call(inp, '{dt_str}');
                     }} else {{
-                        inp.value = '{date_str} {time_str}';
+                        inp.value = '{dt_str}';
                     }}
                     inp.dispatchEvent(new Event('input', {{bubbles: true}}));
                     inp.dispatchEvent(new Event('change', {{bubbles: true}}));
-                    return 'set via input';
+                    return 'set active input';
                 }}
-            }}
-            return false;
-        }})()
-    """)
+                // Try all visible picker inputs
+                const inputs = document.querySelectorAll('.semi-datepicker input, [class*="picker"] input');
+                for (const i of inputs) {{
+                    if (i.offsetParent) {{
+                        const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+                        if (proto && proto.set) {{ proto.set.call(i, '{dt_str}'); }}
+                        else {{ i.value = '{dt_str}'; }}
+                        i.dispatchEvent(new Event('input', {{bubbles: true}}));
+                        i.dispatchEvent(new Event('change', {{bubbles: true}}));
+                        return 'set picker input';
+                    }}
+                }}
+                return false;
+            }})()
+        """)
 
-    if date_set:
-        log.info(f"[DY] Schedule date/time set: {date_str} {time_str}")
+        if typed:
+            log.info(f"[DY] Date/time value set: {typed}")
+        else:
+            # Fallback: select all text and type char by char
+            log.info("[DY] Typing date/time char by char")
+            await session.evaluate("document.execCommand('selectAll')")
+            await asyncio.sleep(0.2)
+            for char in dt_str:
+                await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(char)})")
+                await asyncio.sleep(0.05)
+
+        await asyncio.sleep(1)
+
+        # Press Enter or click 确定 to confirm the date
+        await session.evaluate("""
+            (() => {
+                // Try pressing Enter on active element
+                const inp = document.activeElement;
+                if (inp) {
+                    inp.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', keyCode: 13, bubbles: true}));
+                }
+                // Also try clicking 确定 button in picker popup
+                const btns = document.querySelectorAll('.semi-datepicker-footer button, .semi-button, button');
+                for (const btn of btns) {
+                    const t = (btn.textContent || '').trim();
+                    if ((t === '确定' || t === '确认') && btn.offsetParent !== null) {
+                        btn.click(); return;
+                    }
+                }
+            })()
+        """)
+        await asyncio.sleep(1)
     else:
-        # Try clicking the date picker and using AI
-        log.info("[DY] Trying AI to set schedule date/time")
-        await find_and_click(session, f'在定时发布的日期时间选择器中，设置日期为{date_str}，时间为{time_str}')
+        # AI vision fallback
+        log.info("[DY] Using AI to find and fill date/time picker")
+        await _save_debug_screenshot(session, "no_picker_found")
+        ai_clicked = await find_and_click(
+            session,
+            '在"发布时间"行中，"定时发布"被选中后应该出现一个日期时间选择器。'
+            '请找到这个日期时间输入框并点击它。'
+        )
+        if ai_clicked:
+            await asyncio.sleep(1)
+            await session.evaluate("document.execCommand('selectAll')")
+            await asyncio.sleep(0.2)
+            for char in dt_str:
+                await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(char)})")
+                await asyncio.sleep(0.05)
+            await asyncio.sleep(1)
+            # Confirm
+            await session.evaluate("""
+                (() => {
+                    const btns = document.querySelectorAll('button, span');
+                    for (const btn of btns) {
+                        const t = (btn.textContent || '').trim();
+                        if ((t === '确定' || t === '确认') && btn.offsetParent !== null) {
+                            btn.click(); return;
+                        }
+                    }
+                    document.body.click();
+                })()
+            """)
+            await asyncio.sleep(1)
 
+    # Step 3: Verify scheduled time was set
     await _save_debug_screenshot(session, "scheduled_time")
+    verify = await get_page_analysis(
+        session,
+        '请检查页面上的"发布时间"一行：是否已选中"定时发布"（而不是"立即发布"）？'
+        '日期时间是否已正确填入？只回答JSON: {"scheduled": true/false, "time_shown": "显示的时间", "description": "简要描述"}'
+    )
+    log.info(f"[DY] Schedule verification: {verify[:200]}")
     log.info(f"[DY] Scheduled publish time configured: {scheduled_at}")
 
 
@@ -502,6 +651,53 @@ async def publish(session, task) -> str:
     log.info(f"[DY] Uploading {len(media_paths)} files")
     await upload_files(session, media_paths, selector_key="dy_upload_input", timeout=30)
 
+    # 4.5. Check for upload failure and retry (up to 3 times)
+    for upload_retry in range(3):
+        await asyncio.sleep(5)  # Wait for upload to start processing
+        upload_failed = await session.evaluate("""
+            (() => {
+                const body = document.body.innerText || '';
+                return body.includes('上传失败') || body.includes('重新上传') ||
+                       body.includes('上传出错') || body.includes('上传异常');
+            })()
+        """)
+        if not upload_failed:
+            break
+        log.warning(f"[DY] Upload failed detected, retry {upload_retry + 1}/3")
+        await _save_debug_screenshot(session, f"upload_failed_{upload_retry}")
+
+        # Try clicking "重新上传" link/button first
+        retry_clicked = await session.evaluate("""
+            (() => {
+                const els = document.querySelectorAll('a, button, span, div');
+                for (const el of els) {
+                    const text = el.textContent.trim();
+                    if (text === '重新上传' || text === '重试') {
+                        el.click();
+                        return true;
+                    }
+                }
+                return false;
+            })()
+        """)
+        if retry_clicked:
+            log.info("[DY] Clicked '重新上传' button")
+            await asyncio.sleep(3)
+            # Re-upload files
+            try:
+                await upload_files(session, media_paths, selector_key="dy_upload_input", timeout=30)
+            except Exception as e:
+                log.warning(f"[DY] Re-upload attempt failed: {e}")
+        else:
+            # Reload the page and try from scratch
+            log.info("[DY] No retry button found, reloading page")
+            await session.navigate(await get_current_url(session))
+            await asyncio.sleep(5)
+            try:
+                await upload_files(session, media_paths, selector_key="dy_upload_input", timeout=30)
+            except Exception as e:
+                log.warning(f"[DY] Re-upload after reload failed: {e}")
+
     # 5. Wait for upload processing + editor form
     log.info("[DY] Waiting for upload and editor...")
     if not await _wait_for_editor(session, timeout=120):
@@ -512,10 +708,11 @@ async def publish(session, task) -> str:
     await delay(2, 3)
     await _save_debug_screenshot(session, "editor")
 
-    # 6. Fill title
-    if task.title:
-        log.info(f"[DY] Setting title: {task.title[:30]}...")
-        await _fill_title(session, task.title)
+    # 6. Fill title (required for video, optional for image-text)
+    title_text = task.title or (task.content[:30] if task.content and content_type == "video" else "")
+    if title_text:
+        log.info(f"[DY] Setting title: {title_text[:30]}...")
+        await _fill_title(session, title_text)
         await delay(0.5, 1)
 
     # 7. Fill content/description
@@ -570,7 +767,42 @@ async def publish(session, task) -> str:
     await _click_publish(session)
     await delay(3, 5)
 
-    # 10. Check result — look for toast message or URL change
+    # 11. Check for SMS verification dialog — if present, restore window and wait for user
+    sms_wait_timeout = 300  # 5 minutes for user to complete SMS verification
+    sms_poll_interval = 3
+
+    for attempt in range(sms_wait_timeout // sms_poll_interval):
+        # Check if SMS verification dialog is showing
+        has_sms = await session.evaluate("""
+            (() => {
+                const body = document.body.innerText || '';
+                return body.includes('接收短信验证码') || body.includes('请输入验证码') ||
+                       body.includes('短信验证码') || body.includes('获取验证码') ||
+                       body.includes('发送短信验证') || body.includes('安全验证');
+            })()
+        """)
+
+        if has_sms:
+            if attempt == 0:
+                log.info("[DY] SMS verification dialog detected — waiting for user to complete...")
+                await _save_debug_screenshot(session, "sms_verification")
+                # Restore browser window so user can see and interact
+                try:
+                    await session.send("Browser.setWindowBounds", {
+                        "windowId": 1,
+                        "bounds": {"windowState": "normal"}
+                    })
+                except Exception:
+                    pass
+            if attempt % 10 == 0 and attempt > 0:
+                log.info(f"[DY] Still waiting for SMS verification... ({attempt * sms_poll_interval}s)")
+            await asyncio.sleep(sms_poll_interval)
+            continue
+
+        # No SMS dialog — check result
+        break
+
+    # 12. Check result — look for toast message or URL change
     new_url = await get_current_url(session)
 
     # Check toast messages (Douyin uses semi-toast)

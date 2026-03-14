@@ -85,7 +85,7 @@ async def set_input_value(session, selector_key: str = None, value: str = "", se
 
 
 async def type_text(session, selector_key: str = None, text: str = "", selectors: list = None):
-    """Type text character-by-character into a contenteditable or input."""
+    """Type text into a contenteditable or input using batch insertText."""
     sel = await wait_for_element(session, selector_key, selectors)
     escaped = _js_sel(sel)
     await session.evaluate(f"""
@@ -96,9 +96,9 @@ async def type_text(session, selector_key: str = None, text: str = "", selectors
     """)
     await short_delay()
 
-    for char in text:
-        await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(char)})")
-        await typing_delay()
+    # Insert full text at once to avoid race conditions with char-by-char input
+    await session.evaluate(f"document.execCommand('insertText', false, {json.dumps(text)})")
+    await short_delay()
 
     log.info(f"Typed into {sel}: {text[:50]}...")
 

@@ -27,3 +27,12 @@ dist-ssr
 server/data/profiles/
 server/__pycache__/
 **/__pycache__/
+
+# Debug screenshots & uploaded media
+server/data/debug/
+server/data/uploads/
+server/data/tasks.db
+
+# Temp files
+*.mp3
+*.tts_*
