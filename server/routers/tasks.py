@@ -30,6 +30,8 @@ class TaskCreate(BaseModel):
     category: str = "daily"
     media_paths: list[str] = []
     cover_path: str = ""
+    img_position: str = "end"  # start/end
+    auto_publish: bool = True
 
 
 class TaskUpdate(BaseModel):
@@ -50,6 +52,8 @@ class TaskOut(BaseModel):
     title: str
     content: str
     media_paths: str
+    img_position: str
+    auto_publish: int
     tags: str
     scheduled_at: datetime | None
     color: str
@@ -109,19 +113,24 @@ def create_task(data: TaskCreate, db: Session = Depends(get_db)):
         content=data.content,
         media_paths=json.dumps(data.media_paths),
         cover_path=data.cover_path,
+        img_position=data.img_position,
+        auto_publish=1 if data.auto_publish else 0,
         tags=json.dumps(data.tags),
         scheduled_at=scheduled,
         color=data.color,
         category=data.category,
-        status="pending",
+        status="pending" if data.auto_publish else "manual",
     )
     db.add(task)
     db.commit()
     db.refresh(task)
 
-    # Register with scheduler
-    schedule_task(task.id, scheduled)
-    log.info(f"Task {task.id} created, scheduled for {scheduled}")
+    # Only register with scheduler if auto_publish
+    if data.auto_publish:
+        schedule_task(task.id, scheduled)
+        log.info(f"Task {task.id} created (auto), scheduled for {scheduled}")
+    else:
+        log.info(f"Task {task.id} created (manual record), scheduled_at={scheduled}")
 
     return task
 

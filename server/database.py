@@ -35,11 +35,13 @@ class Task(Base):
     content = Column(Text, default="")
     media_paths = Column(Text, default="[]")       # JSON array
     cover_path = Column(String(500), default="")
+    img_position = Column(String(10), default="end")  # start/end — where inline images go relative to text
     tags = Column(Text, default="[]")              # JSON array
     scheduled_at = Column(DateTime, nullable=False)
     color = Column(String(20), default="#7C3AED")
     category = Column(String(20), default="daily") # sell/edu/story/daily
-    status = Column(String(20), default="pending") # pending/running/success/failed/cancelled
+    auto_publish = Column(Integer, default=1)       # 1=自动发布 0=仅记录，手动标记
+    status = Column(String(20), default="pending") # pending/running/success/failed/cancelled/manual
     retry_count = Column(Integer, default=0)
     error_log = Column(Text, default="")
     publish_url = Column(String(1000), default="")
@@ -61,6 +63,23 @@ class TaskLog(Base):
 
 def init_db():
     Base.metadata.create_all(engine)
+    # Migrate: add new columns if missing (SQLite)
+    _text = __import__("sqlalchemy").text
+    _migrations = [
+        ("img_position", "ALTER TABLE tasks ADD COLUMN img_position VARCHAR(10) DEFAULT 'end'"),
+        ("auto_publish", "ALTER TABLE tasks ADD COLUMN auto_publish INTEGER DEFAULT 1"),
+    ]
+    for col, sql in _migrations:
+        try:
+            with engine.connect() as conn:
+                conn.execute(_text(f"SELECT {col} FROM tasks LIMIT 1"))
+        except Exception:
+            try:
+                with engine.connect() as conn:
+                    conn.execute(_text(sql))
+                    conn.commit()
+            except Exception:
+                pass
 
 
 def get_db():

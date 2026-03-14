@@ -3463,7 +3463,11 @@ div:hover>.sch-inline-del{opacity:1 !important}
               {schTodayTasks.map(t=><div key={t.id} style={{padding:"8px 0",borderBottom:"1px solid var(--bl)",fontSize:11}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span style={{fontWeight:600}}>{t.title||"无标题"}</span>
-                  <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:t.status==="success"?"#DCFCE7":t.status==="failed"?"#FEE2E2":t.status==="running"?"#DBEAFE":"#F3F4F6",color:t.status==="success"?"#16A34A":t.status==="failed"?"#DC2626":t.status==="running"?"#2563EB":"var(--t3)"}}>{t.status==="success"?"已发布":t.status==="failed"?"失败":t.status==="running"?"发布中":"待发布"}</span>
+                  <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,
+                    background:t.status==="success"?"#DCFCE7":t.status==="failed"?"#FEE2E2":t.status==="running"?"#DBEAFE":t.status==="manual"?"#FEF3C7":"#F3F4F6",
+                    color:t.status==="success"?"#16A34A":t.status==="failed"?"#DC2626":t.status==="running"?"#2563EB":t.status==="manual"?"#D97706":"var(--t3)"}}>
+                    {t.status==="success"?"已发布":t.status==="failed"?"失败":t.status==="running"?"发布中":t.status==="manual"?"手动":"待发布"}
+                  </span>
                 </div>
                 <div style={{display:"flex",gap:6,marginTop:4,color:"var(--t3)",fontSize:10}}>
                   <span>{new Date(t.scheduled_at).toTimeString().slice(0,5)}</span>
@@ -3471,6 +3475,7 @@ div:hover>.sch-inline-del{opacity:1 !important}
                   {t.status==="pending"&&<span style={{color:"var(--p)",cursor:"pointer"}} onClick={()=>schPublishNow(t.id)}>立即发布</span>}
                   {t.status==="failed"&&<span style={{color:"var(--r)",cursor:"pointer"}} onClick={()=>schPublishNow(t.id)}>重试</span>}
                   {t.status==="running"&&(Date.now()-new Date(t.updated_at||t.scheduled_at).getTime()>300000)&&<span style={{color:"#F59E0B",cursor:"pointer"}} onClick={()=>schPublishNow(t.id)}>超时重试</span>}
+                  {t.status==="manual"&&<><span style={{color:"#16A34A",cursor:"pointer"}} onClick={()=>schSetStatus(t.id,"success")}>标记已发布</span><span style={{color:"var(--p)",cursor:"pointer"}} onClick={()=>schPublishNow(t.id)}>自动发布</span></>}
                   <span style={{color:"var(--t3)",cursor:"pointer"}} onClick={()=>schDeleteTask(t.id)}>删除</span>
                 </div>
               </div>)}
@@ -3813,7 +3818,7 @@ div:hover>.sch-inline-del{opacity:1 !important}
               const platColors={"xiaohongshu":"#FF2442","douyin":"#111","kuaishou":"#FF6600","wechat":"#07C160"};
               const platNames={"xiaohongshu":"小红书","douyin":"抖音","kuaishou":"快手","wechat":"微信公众号"};
               const platIcons={"xiaohongshu":"红","douyin":"抖","kuaishou":"快","wechat":"微"};
-              const statusCfg={success:{bg:"#DCFCE7",color:"#16A34A",text:"已发布"},failed:{bg:"#FEE2E2",color:"#DC2626",text:"发布失败"},running:{bg:"#DBEAFE",color:"#2563EB",text:"发布中"},pending:{bg:"#F3F4F6",color:"#6B7280",text:"待发布"},cancelled:{bg:"#F3F4F6",color:"#9CA3AF",text:"已取消"}};
+              const statusCfg={success:{bg:"#DCFCE7",color:"#16A34A",text:"已发布"},failed:{bg:"#FEE2E2",color:"#DC2626",text:"发布失败"},running:{bg:"#DBEAFE",color:"#2563EB",text:"发布中"},pending:{bg:"#F3F4F6",color:"#6B7280",text:"待发布"},manual:{bg:"#FEF3C7",color:"#D97706",text:"手动记录"},cancelled:{bg:"#F3F4F6",color:"#9CA3AF",text:"已取消"}};
               const sc=statusCfg[t.status]||statusCfg.pending;
               return<>
                 <div className="sch-td-header">
@@ -3834,6 +3839,11 @@ div:hover>.sch-inline-del{opacity:1 !important}
                   {t.status==="pending"&&<button className="sch-nm-btn pri" style={{fontSize:12,padding:"8px 20px"}} onClick={()=>{schPublishNow(t.id);setSchLogModal(null);}}>立即发布</button>}
                   {t.status==="failed"&&<button className="sch-nm-btn pri" style={{fontSize:12,padding:"8px 20px"}} onClick={()=>{schPublishNow(t.id);setSchLogModal(null);}}>重新发布</button>}
                   {t.status==="running"&&<button className="sch-nm-btn pri" style={{fontSize:12,padding:"8px 20px",background:"#F59E0B"}} onClick={()=>{schPublishNow(t.id);setSchLogModal(null);}}>强制重试</button>}
+                  {t.status==="manual"&&<>
+                    <button className="sch-nm-btn pri" style={{fontSize:12,padding:"8px 20px",background:"#16A34A"}} onClick={()=>{schSetStatus(t.id,"success");setSchLogModal(null);}}>标记已发布</button>
+                    <button className="sch-nm-btn pri" style={{fontSize:12,padding:"8px 20px"}} onClick={()=>{schPublishNow(t.id);setSchLogModal(null);}}>转为自动发布</button>
+                  </>}
+                  {t.status==="success"&&t.auto_publish===0&&<button className="sch-nm-btn sec" style={{fontSize:12,padding:"8px 20px",color:"#D97706"}} onClick={()=>{schSetStatus(t.id,"manual");setSchLogModal(null);}}>改为未发布</button>}
                   <button className="sch-nm-btn sec" style={{fontSize:12,padding:"8px 20px",color:"var(--r)"}} onClick={()=>{schDeleteTask(t.id);setSchLogModal(null);}}>删除任务</button>
                 </div>
               </>;})()}

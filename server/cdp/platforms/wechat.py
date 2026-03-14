@@ -244,14 +244,10 @@ async def _fill_author(session, author: str) -> bool:
     return False
 
 
-async def _fill_content_with_images(session, content: str, image_paths: list) -> bool:
+async def _fill_content_with_images(session, content: str, image_paths: list, img_position: str = "end") -> bool:
     """Fill article body with text and inline images in the ProseMirror editor.
 
-    Layout strategy:
-    - If images provided, insert them between paragraphs of text
-    - First image goes after the first paragraph (or at the top if only one paragraph)
-    - Remaining images are evenly distributed through the content
-    - This creates a natural reading flow: text → image → text → image → ...
+    img_position: "start" = images before text, "end" = images after text.
     """
     # Find the ProseMirror editor
     editor_found = await session.evaluate("""
@@ -278,38 +274,23 @@ async def _fill_content_with_images(session, content: str, image_paths: list) ->
         log.error("[WX] Failed to find content editor (ProseMirror)")
         return False
 
-    # Build HTML content with images interleaved
+    # Build HTML content — images go before or after text based on img_position
     paragraphs = [p for p in content.split("\n")]
+    text_parts = []
+    for p in paragraphs:
+        text_parts.append(f"<p>{p}</p>" if p.strip() else "<p><br></p>")
+
+    img_placeholders = []
+    for idx in range(len(image_paths)):
+        img_placeholders.append(f'<p data-img-placeholder="{idx}"><br></p>')
+
     html_parts = []
-
-    if image_paths:
-        # Calculate image insertion points: distribute images evenly
-        n_images = len(image_paths)
-        n_paras = len(paragraphs)
-
-        if n_paras <= 1:
-            # Few paragraphs: images first, then text
-            for img_path in image_paths:
-                # Note: we can't directly embed local images in ProseMirror
-                # We'll upload them via the editor's image upload mechanism later
-                pass
-            for p in paragraphs:
-                html_parts.append(f"<p>{p}</p>" if p.strip() else "<p><br></p>")
-        else:
-            # Interleave: insert images after every N paragraphs
-            interval = max(1, n_paras // (n_images + 1))
-            img_idx = 0
-            for i, p in enumerate(paragraphs):
-                html_parts.append(f"<p>{p}</p>" if p.strip() else "<p><br></p>")
-                # Insert image after this paragraph at intervals
-                if img_idx < n_images and (i + 1) % interval == 0:
-                    # Placeholder for image — will be replaced by upload
-                    html_parts.append(f'<p data-img-placeholder="{img_idx}"><br></p>')
-                    img_idx += 1
+    if image_paths and img_position == "start":
+        html_parts = img_placeholders + text_parts
+    elif image_paths:
+        html_parts = text_parts + img_placeholders
     else:
-        # No images — just text
-        for p in paragraphs:
-            html_parts.append(f"<p>{p}</p>" if p.strip() else "<p><br></p>")
+        html_parts = text_parts
 
     html_content = "".join(html_parts)
     escaped_html = json.dumps(html_content)
@@ -692,7 +673,8 @@ async def publish(session, task, cdp_port=None) -> str:
 
         content_ok = False
         if task.content:
-            content_ok = await _fill_content_with_images(session, task.content, content_images)
+            img_pos = getattr(task, "img_position", "end") or "end"
+            content_ok = await _fill_content_with_images(session, task.content, content_images, img_pos)
             await delay(0.5, 1)
 
         # Safety check
