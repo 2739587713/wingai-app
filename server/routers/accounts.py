@@ -150,6 +150,10 @@ async def check_login_status(account_id: int, db: Session = Depends(get_db)):
             "authenticate", "validation", "scanlogin", "loginpage",
         ])
 
+        # WeChat MP: login page is just mp.weixin.qq.com (no /login in URL)
+        # Must check if it's the QR login page by looking at the page content
+        is_wechat_domain = "mp.weixin.qq.com" in url
+
         # Also check page content for verification-related text
         # (SMS code input, captcha, phone verification etc.)
         is_verification_page = await session.evaluate("""
@@ -181,26 +185,94 @@ async def check_login_status(account_id: int, db: Session = Depends(get_db)):
             "cp.kuaishou.com/profile",
             "cp.kuaishou.com/",
             "mp.weixin.qq.com/cgi-bin/home",
-            "mp.weixin.qq.com/",
         ])
         if url.rstrip("/") == "https://creator.douyin.com":
             is_creator_page = True
 
+        # For WeChat: if on mp.weixin.qq.com but NOT on cgi-bin/home,
+        # we need to check if we're on the QR login page or the dashboard
+        if is_wechat_domain and not is_creator_page:
+            # Check for WeChat QR login page indicators
+            wechat_login_check = await session.evaluate("""
+                (() => {
+                    const body = document.body.innerText || '';
+                    // QR login page has these elements/text
+                    const loginIndicators = [
+                        '扫码登录', '微信扫一扫', '扫一扫登录', '使用微信扫一扫',
+                        '请扫码', '扫描二维码', '微信公众平台',
+                    ];
+                    for (const t of loginIndicators) {
+                        if (body.includes(t)) return 'login_page';
+                    }
+                    // Check for QR code image (WeChat login has an img for QR)
+                    const qrImg = document.querySelector('.login__type__container__scan__qrcode img, .qrcode img, img[src*="qrcode"], .login_qrcode_area img, .wrp_code img');
+                    if (qrImg) return 'login_page';
+                    // Check for iframe-based QR code
+                    const qrIframe = document.querySelector('iframe[src*="login"]');
+                    if (qrIframe) return 'login_page';
+                    // If we see dashboard content, it's logged in
+                    if (body.includes('新的创作') || body.includes('内容管理') || body.includes('数据分析')) return 'dashboard';
+                    // Default: treat as login page (safer — avoids false positive)
+                    return 'unknown';
+                })()
+            """)
+            log.info(f"[Login] WeChat check result: {wechat_login_check}, url: {url}")
+            if wechat_login_check != 'dashboard':
+                still_in_login_flow = True
+
+        # WeChat with token in URL = definitely logged in (cgi-bin/home?token=...)
+        # Confirm immediately without further JS checks that might fail during page load
+        if is_creator_page and is_wechat_domain and "token=" in url:
+            log.info(f"[Login] Account {account_id} WeChat login confirmed via URL token")
+            # Logged in! Save cookies (with retry for page loading)
+            try:
+                cookies = await session.get_cookies()
+                save_cookies(acct, cookies)
+            except Exception as e:
+                log.warning(f"[Login] Cookie save failed (will retry next time): {e}")
+
+            acct.status = "active"
+            db.commit()
+
+            nickname = acct.nickname
+            try:
+                nickname = await session.evaluate("""
+                    (() => {
+                        const el = document.querySelector('.user-name, .nick-name, [class*="nickname"]');
+                        return el ? el.textContent.trim() : '';
+                    })()
+                """) or acct.nickname
+            except Exception:
+                pass
+            acct.nickname = nickname
+            db.commit()
+
+            await session.close()
+            kill_chrome(login_data["proc"])
+            _login_sessions.pop(account_id, None)
+            return {"status": "logged_in", "nickname": nickname}
+
         # Check for avatar/user elements as strong login signal
+        # Use platform-specific selectors to avoid false positives
         has_user_element = await session.evaluate("""
             (() => {
-                const el = document.querySelector('img[class*="avatar"], .user-name, .nick-name, [class*="nickname"], [class*="user-info"], .weui-desktop-account__thumb, .head_img');
-                return !!el;
+                const el = document.querySelector('img[class*="avatar"], .user-name, .nick-name, [class*="nickname"], .weui-desktop-account__thumb, .head_img');
+                if (el) {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0) return true;
+                }
+                return false;
             })()
         """)
 
         # Check if the page shows "not logged in" indicators
-        # (e.g. Kuaishou profile page shows "立即登录" when not logged in)
         shows_login_prompt = await session.evaluate("""
             (() => {
                 const body = document.body.innerText || '';
                 const prompts = ['立即登录', '扫码登录', '密码登录', '验证码登录',
-                                  '请输入手机号', '登录/注册', '登录或注册'];
+                                  '请输入手机号', '登录/注册', '登录或注册',
+                                  '使用微信扫一扫', '微信扫一扫', '扫一扫登录',
+                                  '请扫码', '扫描二维码'];
                 for (const t of prompts) { if (body.includes(t)) return true; }
                 return false;
             })()
@@ -208,11 +280,12 @@ async def check_login_status(account_id: int, db: Session = Depends(get_db)):
         if shows_login_prompt:
             still_in_login_flow = True
 
+        log.info(f"[Login] Account {account_id} | still_in_login={still_in_login_flow} | is_creator={is_creator_page} | has_user={has_user_element} | login_prompt={shows_login_prompt}")
+
         # Only confirm login if:
         # 1. On a known creator page with user elements, AND
         # 2. NOT on a verification/login page
         if not still_in_login_flow and (is_creator_page or has_user_element):
-            # Double check — must have avatar or be on creator-micro page
             if is_creator_page or has_user_element:
                 # Logged in! Save cookies
                 cookies = await session.get_cookies()

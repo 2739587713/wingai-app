@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 
 const STYLES = [
-  { id: "cinematic", label: "电影感", emoji: "🎬", color: "#7C3AED", desc: "大片级画面质感" },
-  { id: "anime", label: "动漫风", emoji: "🎨", color: "#3B82F6", desc: "日系动漫风格" },
-  { id: "realistic", label: "写实", emoji: "📷", color: "#059669", desc: "真实感画面" },
+  { id: "cinematic", label: "电影感", emoji: "🎬", color: "#7C3AED", bg: "linear-gradient(135deg,#7C3AED20,#8B5CF620)", desc: "大片级画面质感" },
+  { id: "anime", label: "动漫风", emoji: "🎨", color: "#3B82F6", bg: "linear-gradient(135deg,#3B82F620,#60A5FA20)", desc: "日系动漫风格" },
+  { id: "realistic", label: "写实", emoji: "📷", color: "#059669", bg: "linear-gradient(135deg,#05966920,#10B98120)", desc: "真实感画面" },
 ];
 
 const HOOKS = [
@@ -192,33 +192,33 @@ export default function StoryboardWorkbench() {
   return (<>
     <style>{CSS}</style>
     <div className="sw-wrap">
-      {/* Header bar */}
-      <div className="sw-topbar">
-        <div className="sw-topbar-l">
-          <div className="sw-logo">
-            <span className="sw-logo-icon">🎬</span>
-            <span className="sw-logo-text">AI分镜工作台</span>
+
+      {/* ===== HERO BANNER ===== */}
+      <div className="sw-hero">
+        <div className="sw-hero-orb sw-hero-orb1" />
+        <div className="sw-hero-orb sw-hero-orb2" />
+        <div className="sw-hero-orb sw-hero-orb3" />
+        <div className="sw-hero-content">
+          <div className="sw-hero-left">
+            <div className="sw-hero-badge">AI Storyboard</div>
+            <h1 className="sw-hero-title">AI卖货分镜工作台</h1>
+            <p className="sw-hero-desc">多Agent协作驱动 · 智能分镜编排 · 一键合成视频</p>
           </div>
-          <div className="sw-topbar-tags">
-            <span className="sw-tag">多Agent协作</span>
-            <span className="sw-tag">智能分镜</span>
-            <span className="sw-tag">一键成片</span>
+          <div className="sw-hero-right">
+            {isWorking && <span className="sw-timer">⏱ {fmtTime(elapsed)}</span>}
+            {step !== "input" && <button className="sw-btn ghost-light" onClick={reset}>↻ 重新开始</button>}
           </div>
-        </div>
-        <div className="sw-topbar-r">
-          {isWorking && <span className="sw-timer">⏱ {fmtTime(elapsed)}</span>}
-          {step !== "input" && <button className="sw-btn ghost sm" onClick={reset}>↻ 重来</button>}
         </div>
       </div>
 
-      {/* Phase progress */}
+      {/* ===== PHASE STEPS ===== */}
       {step !== "input" && step !== "done" && (
         <div className="sw-phases">
           {PHASES.map((ph, i) => (
             <div key={ph.key} className={`sw-phase ${i < phaseIdx ? "done" : i === phaseIdx ? "on" : ""}`}>
               <div className="sw-phase-dot">{i < phaseIdx ? "✓" : ph.icon}</div>
               <span className="sw-phase-label">{ph.label}</span>
-              {i < PHASES.length - 1 && <div className="sw-phase-line" />}
+              {i < PHASES.length - 1 && <div className={`sw-phase-line ${i < phaseIdx ? "done" : ""}`} />}
             </div>
           ))}
         </div>
@@ -235,102 +235,110 @@ export default function StoryboardWorkbench() {
       {/* ========== INPUT STEP ========== */}
       {step === "input" && (
         <div className="sw-input-layout">
-          {/* Left: main input */}
-          <div className="sw-input-main">
-            <div className="sw-card no-mb">
-              <div className="sw-card-hd">
-                <span className="sw-card-ic">💡</span>
-                <span className="sw-card-t">产品 / 故事描述</span>
-                <span className="sw-char-ct" style={{ color: input.length > 180 ? "var(--r)" : "var(--t3)" }}>{input.length}/200</span>
+          {/* Left column */}
+          <div className="sw-col-main">
+            {/* Story textarea */}
+            <div className="sw-panel">
+              <div className="sw-panel-hd">
+                <div className="sw-panel-icon purple">💡</div>
+                <div className="sw-panel-title">产品 / 故事描述</div>
+                <span className="sw-counter" data-warn={input.length > 180 ? "" : undefined}>{input.length}/200</span>
               </div>
               <textarea className="sw-textarea" value={input} onChange={e => setInput(e.target.value)}
-                maxLength={200} rows={3} placeholder="描述你要卖的产品或想表达的故事..." />
-              <div className="sw-examples">
-                <span className="sw-examples-l">✨ 快速填入</span>
-                <div className="sw-examples-list">
-                  {EXAMPLES.map((ex, i) => (
-                    <button key={i} className="sw-example-tag" onClick={() => setInput(ex.text)}>
-                      <span>{ex.icon}</span> {ex.text.length > 14 ? ex.text.slice(0, 14) + "..." : ex.text}
-                    </button>
-                  ))}
+                maxLength={200} rows={4} placeholder="描述你要卖的产品或想表达的故事，AI将自动拆解为专业分镜脚本..." />
+              <div className="sw-quick">
+                <span className="sw-quick-label">✨ 灵感速填</span>
+                {EXAMPLES.map((ex, i) => (
+                  <button key={i} className="sw-quick-tag" onClick={() => setInput(ex.text)}>
+                    {ex.icon} {ex.text.slice(0, 12)}...
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Detail fields */}
+            <div className="sw-fields">
+              <div className="sw-field">
+                <div className="sw-field-hd">
+                  <span>🎭 角色描述</span>
+                  <span className="sw-field-opt">可选</span>
                 </div>
-              </div>
-            </div>
-
-            {/* Character & Product in one row */}
-            <div className="sw-detail-row">
-              <div className="sw-detail-item">
-                <label className="sw-detail-label">🎭 角色描述 <span className="sw-opt-tag">可选</span></label>
                 <input value={charDesc} onChange={e => setCharDesc(e.target.value)}
-                  placeholder="如：25岁女性，穿白色连衣裙..." className="sw-input" />
+                  placeholder="如：25岁女性，穿白色连衣裙..." className="sw-ipt" />
               </div>
-              <div className="sw-detail-item">
-                <label className="sw-detail-label">📦 产品详情 <span className="sw-opt-tag">可选</span></label>
+              <div className="sw-field">
+                <div className="sw-field-hd">
+                  <span>📦 产品详情</span>
+                  <span className="sw-field-opt">可选</span>
+                </div>
                 <input value={productDetail} onChange={e => setProductDetail(e.target.value)}
-                  placeholder="产品卖点、价格等..." className="sw-input" />
+                  placeholder="产品卖点、价格等..." className="sw-ipt" />
               </div>
             </div>
 
-            <button className="sw-btn primary full" onClick={generateStoryboard} disabled={!input.trim()}>
-              <span className="sw-btn-shine" />
-              ✨ AI智能生成分镜
+            {/* CTA */}
+            <button className="sw-cta" onClick={generateStoryboard} disabled={!input.trim()}>
+              <span className="sw-cta-shine" />
+              <span className="sw-cta-inner">
+                <span className="sw-cta-icon">✨</span>
+                <span>AI智能生成分镜</span>
+              </span>
             </button>
           </div>
 
-          {/* Right: settings sidebar */}
-          <div className="sw-input-side">
-            {/* Style */}
-            <div className="sw-card no-mb">
-              <div className="sw-card-hd compact">
-                <span className="sw-card-ic">🎨</span>
-                <span className="sw-card-t">视觉风格</span>
+          {/* Right column */}
+          <div className="sw-col-side">
+            {/* Visual Style */}
+            <div className="sw-panel compact">
+              <div className="sw-panel-hd">
+                <div className="sw-panel-icon blue">🎨</div>
+                <div className="sw-panel-title">视觉风格</div>
               </div>
-              <div className="sw-styles-v">
+              <div className="sw-style-list">
                 {STYLES.map(s => (
-                  <div key={s.id} className={`sw-style-v ${style === s.id ? "on" : ""}`}
-                    onClick={() => setStyle(s.id)} style={{ "--sc": s.color }}>
-                    <span className="sw-style-v-emoji">{s.emoji}</span>
-                    <div className="sw-style-v-info">
-                      <div className="sw-style-v-name">{s.label}</div>
-                      <div className="sw-style-v-desc">{s.desc}</div>
+                  <div key={s.id} className={`sw-sty ${style === s.id ? "on" : ""}`}
+                    onClick={() => setStyle(s.id)} style={{ "--sc": s.color, "--sbg": s.bg }}>
+                    <div className="sw-sty-dot" />
+                    <div className="sw-sty-info">
+                      <span className="sw-sty-name">{s.emoji} {s.label}</span>
+                      <span className="sw-sty-desc">{s.desc}</span>
                     </div>
-                    {style === s.id && <span className="sw-style-v-check">✓</span>}
+                    {style === s.id && <div className="sw-sty-check">✓</div>}
                   </div>
                 ))}
               </div>
             </div>
 
             {/* Duration */}
-            <div className="sw-card no-mb">
-              <div className="sw-card-hd compact">
-                <span className="sw-card-ic">⏱</span>
-                <span className="sw-card-t">时长</span>
-                <span className="sw-dur-val">{duration}s</span>
+            <div className="sw-panel compact">
+              <div className="sw-panel-hd">
+                <div className="sw-panel-icon green">⏱</div>
+                <div className="sw-panel-title">视频时长</div>
+                <span className="sw-dur-num">{duration}<small>秒</small></span>
               </div>
-              <div className="sw-range-wrap">
-                <input type="range" min={15} max={120} value={duration} onChange={e => setDuration(+e.target.value)}
-                  className="sw-range" />
-                <div className="sw-range-bar">
-                  <div className="sw-range-fill" style={{ width: `${durationPct}%` }} />
-                </div>
+              <div className="sw-slider-track">
+                <div className="sw-slider-fill" style={{ width: `${durationPct}%` }} />
+                <input type="range" min={15} max={120} value={duration} onChange={e => setDuration(+e.target.value)} className="sw-slider" />
               </div>
-              <div className="sw-range-labels">
-                <span>15s</span><span>60s</span><span>120s</span>
+              <div className="sw-slider-labels">
+                <span className={duration <= 30 ? "on" : ""}>短视频 15-30s</span>
+                <span className={duration > 30 && duration <= 75 ? "on" : ""}>中视频 30-75s</span>
+                <span className={duration > 75 ? "on" : ""}>长视频 75-120s</span>
               </div>
             </div>
 
-            {/* Hook */}
-            <div className="sw-card no-mb">
-              <div className="sw-card-hd compact">
-                <span className="sw-card-ic">🪝</span>
-                <span className="sw-card-t">开场钩子</span>
+            {/* Hook type */}
+            <div className="sw-panel compact">
+              <div className="sw-panel-hd">
+                <div className="sw-panel-icon orange">🪝</div>
+                <div className="sw-panel-title">开场钩子</div>
               </div>
-              <div className="sw-hooks">
+              <div className="sw-hook-grid">
                 {HOOKS.map(h => (
-                  <button key={h.id} className={`sw-hook ${hookType === h.id ? "on" : ""}`}
+                  <button key={h.id} className={`sw-hk ${hookType === h.id ? "on" : ""}`}
                     onClick={() => setHookType(h.id)}>
-                    <span className="sw-hook-icon">{h.icon}</span>
-                    <span>{h.label}</span>
+                    <span className="sw-hk-icon">{h.icon}</span>
+                    <span className="sw-hk-label">{h.label}</span>
                   </button>
                 ))}
               </div>
@@ -341,17 +349,20 @@ export default function StoryboardWorkbench() {
 
       {/* ========== GENERATING ========== */}
       {step === "generating" && (
-        <div className="sw-gen-center">
+        <div className="sw-gen-wrap">
           <div className="sw-gen-card">
-            <div className="sw-gen-glow" />
+            <div className="sw-gen-bg" />
+            <div className="sw-gen-rings">
+              <div className="sw-gen-ring r1" />
+              <div className="sw-gen-ring r2" />
+              <div className="sw-gen-ring r3" />
+            </div>
             <div className="sw-gen-emoji">🎬</div>
-            <div className="sw-gen-msg">{progress || "处理中..."}</div>
+            <div className="sw-gen-msg">{progress || "AI正在创作中..."}</div>
             <div className="sw-gen-agents">
-              <span className="sw-agent on">🎬 导演</span>
-              <span className="sw-agent-arrow">→</span>
-              <span className="sw-agent">✍️ 编剧</span>
-              <span className="sw-agent-arrow">→</span>
-              <span className="sw-agent">🎞 制片</span>
+              {["🎬 导演","✍️ 编剧","🎞 制片"].map((a, i) => (
+                <span key={i} className={`sw-ga ${i === 0 ? "on" : ""}`}>{a}</span>
+              ))}
             </div>
             <div className="sw-gen-bar"><div className="sw-gen-bar-fill" /></div>
           </div>
@@ -360,74 +371,91 @@ export default function StoryboardWorkbench() {
 
       {/* ========== REVIEW / IMAGES ========== */}
       {(step === "review" || step === "images") && (
-        <div className="sw-review">
-          {/* Toolbar */}
-          <div className="sw-toolbar">
-            <div className="sw-toolbar-l">
-              <span className="sw-toolbar-count">{frames.length} 场景</span>
-              <div className="sw-toolbar-progress">
-                <div className="sw-toolbar-bar">
-                  <div className="sw-toolbar-bar-fill" style={{ width: `${(approvedCount / Math.max(frames.length, 1)) * 100}%` }} />
-                </div>
-                <span className="sw-toolbar-pct">{approvedCount}/{frames.length} 通过</span>
+        <div className="sw-review-sec">
+          {/* Sticky toolbar */}
+          <div className="sw-tb">
+            <div className="sw-tb-left">
+              <div className="sw-tb-stat">
+                <span className="sw-tb-num">{frames.length}</span>
+                <span className="sw-tb-lbl">场景</span>
               </div>
-              {costEstimate && (
-                <div className="sw-toolbar-cost">
-                  <span>💰 ¥{costEstimate.total_cost?.toFixed(2) || "?"}</span>
-                  <span className="sw-toolbar-cost-d">图片 ¥{costEstimate.image_cost?.toFixed(2)} · 视频 ¥{costEstimate.video_cost?.toFixed(2)}</span>
+              <div className="sw-tb-divider" />
+              <div className="sw-tb-progress-wrap">
+                <div className="sw-tb-ring">
+                  <svg viewBox="0 0 36 36">
+                    <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--s3)" strokeWidth="3" />
+                    <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--g)" strokeWidth="3"
+                      strokeDasharray={`${(approvedCount / Math.max(frames.length, 1)) * 100} 100`}
+                      strokeLinecap="round" transform="rotate(-90 18 18)" />
+                  </svg>
+                  <span className="sw-tb-ring-num">{approvedCount}</span>
                 </div>
-              )}
+                <span className="sw-tb-lbl">已通过</span>
+              </div>
+              {costEstimate && (<>
+                <div className="sw-tb-divider" />
+                <div className="sw-tb-cost">
+                  <span className="sw-tb-cost-total">¥{costEstimate.total_cost?.toFixed(2)}</span>
+                  <span className="sw-tb-lbl">图片¥{costEstimate.image_cost?.toFixed(2)} + 视频¥{costEstimate.video_cost?.toFixed(2)}</span>
+                </div>
+              </>)}
             </div>
-            <div className="sw-toolbar-r">
+            <div className="sw-tb-right">
               {step === "images" && <span className="sw-timer">⏱ {fmtTime(elapsed)}</span>}
-              <button className={`sw-btn primary sm ${!allApproved ? "disabled" : ""}`}
+              <button className={`sw-btn primary ${!allApproved ? "off" : ""}`}
                 onClick={generateImages} disabled={!allApproved}>
                 🖼 生成图片{!allApproved ? ` (${frames.length - approvedCount}待审)` : ""}
               </button>
-              {hasImages && (
-                <button className="sw-btn primary sm" onClick={produceVideo}>🎥 合成视频</button>
-              )}
+              {hasImages && <button className="sw-btn primary" onClick={produceVideo}>🎥 合成视频</button>}
             </div>
           </div>
 
-          {progress && <div className="sw-progress-msg">{progress}</div>}
+          {progress && <div className="sw-prog-bar"><div className="sw-prog-text">{progress}</div></div>}
 
           {/* Frame grid */}
           <div className="sw-grid">
             {frames.map((f) => (
               <div key={f.frame_id} className={`sw-frame ${f.status}`}>
-                <div className="sw-frame-img-wrap">
+                {/* Image area */}
+                <div className="sw-frame-vis">
                   {f.image_url
                     ? <img src={f.image_url} alt="" className="sw-frame-img" />
                     : imgProgress[f.frame_id]
-                      ? <div className="sw-frame-img-ph"><span className="sw-spinner" /></div>
-                      : <div className="sw-frame-img-ph"><span className="sw-frame-ph-num">#{f.frame_id + 1}</span></div>
+                      ? <div className="sw-frame-ph"><span className="sw-spin" /></div>
+                      : <div className="sw-frame-ph"><span className="sw-frame-ph-n">#{f.frame_id + 1}</span></div>
                   }
-                  <div className="sw-frame-overlay">
+                  <div className="sw-frame-top-bar">
                     <span className="sw-frame-num">场景 {f.frame_id + 1}</span>
-                    <span className={`sw-frame-badge ${f.status}`}>
+                    <span className={`sw-badge ${f.status}`}>
                       {f.status === "approved" ? "✓ 通过" : f.status === "rejected" ? "✗ 拒绝" : f.status === "regenerating" ? "♻ 重生中" : "待审核"}
                     </span>
                   </div>
-                </div>
-
-                <div className="sw-frame-body">
-                  <div className="sw-frame-visual">{f.visual_prompt || f.visual_description}</div>
-                  <div className="sw-frame-narr">🎙 {f.narration}</div>
-                  <div className="sw-frame-meta">
+                  <div className="sw-frame-meta-bar">
                     <span>⏱ {f.duration || 5}s</span>
                     <span>📷 {f.camera || f.camera_direction || "自动"}</span>
                   </div>
+                </div>
+
+                {/* Text content */}
+                <div className="sw-frame-content">
+                  <p className="sw-frame-prompt">{f.visual_prompt || f.visual_description}</p>
+                  <p className="sw-frame-narr">🎙 {f.narration}</p>
 
                   {f.status === "pending" && (
-                    <div className="sw-frame-actions">
-                      <input placeholder="修改建议..." value={feedbackMap[f.frame_id] || ""}
+                    <div className="sw-frame-act">
+                      <input placeholder="修改建议 (可选)" value={feedbackMap[f.frame_id] || ""}
                         onChange={e => setFeedbackMap(prev => ({ ...prev, [f.frame_id]: e.target.value }))}
-                        className="sw-input compact" />
+                        className="sw-ipt sm" />
                       <div className="sw-frame-btns">
-                        <button className="sw-fbtn approve" onClick={() => approveFrame(f.frame_id)}>✓</button>
-                        <button className="sw-fbtn reject" onClick={() => rejectFrame(f.frame_id)}>✗</button>
-                        <button className="sw-fbtn regen" onClick={() => regenFrame(f.frame_id)}>♻</button>
+                        <button className="sw-abtn ok" onClick={() => approveFrame(f.frame_id)}>
+                          <span>✓</span> 通过
+                        </button>
+                        <button className="sw-abtn no" onClick={() => rejectFrame(f.frame_id)}>
+                          <span>✗</span> 拒绝
+                        </button>
+                        <button className="sw-abtn re" onClick={() => regenFrame(f.frame_id)}>
+                          <span>♻</span>
+                        </button>
                       </div>
                     </div>
                   )}
@@ -440,9 +468,13 @@ export default function StoryboardWorkbench() {
 
       {/* ========== PRODUCING ========== */}
       {step === "producing" && (
-        <div className="sw-gen-center">
+        <div className="sw-gen-wrap">
           <div className="sw-gen-card">
-            <div className="sw-gen-glow" />
+            <div className="sw-gen-bg" />
+            <div className="sw-gen-rings">
+              <div className="sw-gen-ring r1" />
+              <div className="sw-gen-ring r2" />
+            </div>
             <div className="sw-gen-emoji">🎥</div>
             <div className="sw-gen-msg">{progress || "合成中..."}</div>
             <div className="sw-gen-sub">⏱ {fmtTime(elapsed)}</div>
@@ -453,38 +485,40 @@ export default function StoryboardWorkbench() {
 
       {/* ========== DONE ========== */}
       {step === "done" && videoUrl && (
-        <div className="sw-done-layout">
+        <div className="sw-done-wrap">
           <div className="sw-done-card">
-            <div className="sw-done-badge">🎉 分镜视频已完成</div>
+            <div className="sw-done-glow" />
+            <div className="sw-done-header">
+              <span className="sw-done-icon">🎉</span>
+              <span>分镜视频已完成</span>
+            </div>
             <div className="sw-done-player">
               <video src={videoUrl} controls className="sw-video" />
             </div>
             <div className="sw-done-info">
-              <div className="sw-done-title">AI卖货分镜</div>
               <div className="sw-done-meta">
-                <span>🎨 {activeStyle?.label || style}</span>
-                <span>⏱ {duration}秒</span>
-                <span>🎬 {frames.length} 场景</span>
+                <div className="sw-done-chip">🎨 {activeStyle?.label || style}</div>
+                <div className="sw-done-chip">⏱ {duration}秒</div>
+                <div className="sw-done-chip">🎬 {frames.length} 场景</div>
               </div>
-              <div className="sw-done-acts">
-                <a href={videoUrl} download className="sw-btn primary">⬇ 下载视频</a>
-                <button className="sw-btn ghost" onClick={reset}>✨ 新分镜</button>
+              <div className="sw-done-btns">
+                <a href={videoUrl} download className="sw-btn primary lg">⬇ 下载视频</a>
+                <button className="sw-btn ghost lg" onClick={reset}>✨ 创建新分镜</button>
               </div>
             </div>
           </div>
-          {/* Thumbnails sidebar */}
+          {/* Scene thumbnails strip */}
           {frames.some(f => f.image_url) && (
-            <div className="sw-done-thumbs">
-              <div className="sw-done-thumbs-title">场景一览</div>
-              {frames.map(f => (
-                <div key={f.frame_id} className="sw-done-thumb">
-                  {f.image_url && <img src={f.image_url} alt="" />}
-                  <div className="sw-done-thumb-info">
+            <div className="sw-done-strip">
+              <div className="sw-done-strip-title">场景一览</div>
+              <div className="sw-done-strip-scroll">
+                {frames.filter(f => f.image_url).map(f => (
+                  <div key={f.frame_id} className="sw-done-thumb">
+                    <img src={f.image_url} alt="" />
                     <span>#{f.frame_id + 1}</span>
-                    <span>{f.duration || 5}s</span>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -494,207 +528,252 @@ export default function StoryboardWorkbench() {
 }
 
 const CSS = `
-.sw-wrap{padding:16px 20px;height:calc(100vh - 52px);overflow-y:auto;background:var(--bg)}
-.sw-wrap::-webkit-scrollbar{width:4px}.sw-wrap::-webkit-scrollbar-thumb{background:var(--b);border-radius:2px}
+/* ===== WRAPPER ===== */
+.sw-wrap{padding:0;height:calc(100vh - 52px);overflow-y:auto;overflow-x:hidden}
+.sw-wrap::-webkit-scrollbar{width:5px}
+.sw-wrap::-webkit-scrollbar-thumb{background:var(--b);border-radius:3px}
 
-/* ===== Top bar ===== */
-.sw-topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--s);border:1px solid var(--bl);border-radius:12px;margin-bottom:14px}
-.sw-topbar-l{display:flex;align-items:center;gap:14px}
-.sw-logo{display:flex;align-items:center;gap:8px}
-.sw-logo-icon{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--p),var(--pl));display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;line-height:32px;text-align:center}
-.sw-logo-text{font-size:15px;font-weight:800;letter-spacing:-.3px}
-.sw-topbar-tags{display:flex;gap:6px}
-.sw-tag{font-size:10px;color:var(--p);background:var(--pbg);padding:3px 8px;border-radius:4px;font-weight:600}
-.sw-topbar-r{display:flex;align-items:center;gap:8px}
-.sw-timer{font-size:11px;color:var(--p);font-weight:600;padding:3px 8px;background:var(--pbg);border-radius:5px}
+/* ===== HERO BANNER ===== */
+.sw-hero{position:relative;padding:20px 28px;background:linear-gradient(135deg,#7C3AED 0%,#6D28D9 40%,#4C1D95 100%);overflow:hidden;margin:0}
+.sw-hero-orb{position:absolute;border-radius:50%;filter:blur(50px);opacity:.3;pointer-events:none}
+.sw-hero-orb1{width:200px;height:200px;background:#A78BFA;top:-60px;right:10%;animation:swFloat 8s ease-in-out infinite}
+.sw-hero-orb2{width:140px;height:140px;background:#C084FC;bottom:-40px;left:5%;animation:swFloat 6s ease-in-out infinite 1s}
+.sw-hero-orb3{width:100px;height:100px;background:#818CF8;top:10px;right:30%;animation:swFloat 10s ease-in-out infinite 2s}
+@keyframes swFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-15px)}}
+.sw-hero-content{position:relative;display:flex;align-items:center;justify-content:space-between;z-index:1}
+.sw-hero-left{display:flex;flex-direction:column;gap:4px}
+.sw-hero-badge{display:inline-flex;align-self:flex-start;padding:3px 10px;border-radius:5px;background:rgba(255,255,255,.15);color:rgba(255,255,255,.85);font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.1)}
+.sw-hero-title{margin:4px 0 0;font-size:22px;font-weight:900;color:#fff;letter-spacing:-.5px}
+.sw-hero-desc{margin:0;font-size:12px;color:rgba(255,255,255,.7);font-weight:400}
+.sw-hero-right{display:flex;align-items:center;gap:8px}
+.sw-timer{font-size:11px;color:#fff;font-weight:600;padding:4px 10px;background:rgba(255,255,255,.15);border-radius:6px;backdrop-filter:blur(8px)}
 
-/* ===== Buttons ===== */
-.sw-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 18px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;border:none;font-family:inherit;transition:all .2s ease;text-decoration:none;position:relative;overflow:hidden}
-.sw-btn.primary{background:linear-gradient(135deg,var(--p),var(--pl));color:#fff;box-shadow:0 2px 10px rgba(124,58,237,.2)}
+/* ===== BUTTONS ===== */
+.sw-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 18px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;border:none;font-family:inherit;transition:all .2s;text-decoration:none;white-space:nowrap}
+.sw-btn.primary{background:linear-gradient(135deg,var(--p),var(--pl));color:#fff;box-shadow:0 2px 12px rgba(124,58,237,.2)}
 .sw-btn.primary:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(124,58,237,.3)}
-.sw-btn.primary:disabled,.sw-btn.primary.disabled{opacity:.5;cursor:default;transform:none}
-.sw-btn.primary.sm{padding:7px 14px;font-size:12px;border-radius:8px}
+.sw-btn.primary:disabled,.sw-btn.primary.off{opacity:.45;cursor:default;transform:none}
+.sw-btn.primary.lg{padding:10px 24px;font-size:13px}
 .sw-btn.ghost{background:var(--s);color:var(--t2);border:1.5px solid var(--bl)}
 .sw-btn.ghost:hover{border-color:var(--pl);color:var(--p)}
-.sw-btn.ghost.sm{padding:5px 10px;font-size:11px;border-radius:7px}
-.sw-btn.full{width:100%;padding:12px;font-size:14px;font-weight:700;border-radius:12px}
-.sw-btn-shine{position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);animation:swShine 3s infinite}
-@keyframes swShine{0%{left:-100%}100%{left:200%}}
+.sw-btn.ghost.lg{padding:10px 24px;font-size:13px}
+.sw-btn.ghost-light{padding:6px 14px;border-radius:8px;background:rgba(255,255,255,.12);color:rgba(255,255,255,.9);font-size:11px;font-weight:600;cursor:pointer;border:1px solid rgba(255,255,255,.15);backdrop-filter:blur(8px);font-family:inherit;transition:all .2s}
+.sw-btn.ghost-light:hover{background:rgba(255,255,255,.2)}
 
-/* ===== Input layout: two columns ===== */
-.sw-input-layout{display:grid;grid-template-columns:1fr 280px;gap:16px;align-items:start}
+/* ===== INPUT LAYOUT ===== */
+.sw-input-layout{display:grid;grid-template-columns:1fr 300px;gap:16px;padding:20px 28px}
 
-.sw-input-main{display:flex;flex-direction:column;gap:12px}
-.sw-input-side{display:flex;flex-direction:column;gap:12px}
+.sw-col-main{display:flex;flex-direction:column;gap:14px}
+.sw-col-side{display:flex;flex-direction:column;gap:12px}
 
-.sw-card{background:var(--s);border:1px solid var(--bl);border-radius:14px;padding:16px;transition:all .2s ease}
-.sw-card:hover{box-shadow:0 2px 12px rgba(0,0,0,.03)}
-.sw-card.no-mb{margin-bottom:0}
-.sw-card-hd{display:flex;align-items:center;gap:7px;margin-bottom:12px}
-.sw-card-hd.compact{margin-bottom:10px}
-.sw-card-ic{font-size:14px}
-.sw-card-t{font-size:13px;font-weight:700}
-.sw-char-ct{margin-left:auto;font-size:10px}
+/* Panel */
+.sw-panel{background:var(--s);border:1px solid var(--bl);border-radius:14px;padding:18px;position:relative;transition:box-shadow .25s}
+.sw-panel:hover{box-shadow:0 4px 20px rgba(0,0,0,.04)}
+.sw-panel.compact{padding:14px 16px}
+.sw-panel-hd{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.sw-panel-icon{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.sw-panel-icon.purple{background:linear-gradient(135deg,#F5F0FF,#EDE9FE)}
+.sw-panel-icon.blue{background:linear-gradient(135deg,#EFF6FF,#DBEAFE)}
+.sw-panel-icon.green{background:linear-gradient(135deg,#ECFDF5,#D1FAE5)}
+.sw-panel-icon.orange{background:linear-gradient(135deg,#FFF7ED,#FFEDD5)}
+.sw-panel-title{font-size:13px;font-weight:700;color:var(--t1)}
+.sw-counter{margin-left:auto;font-size:10px;color:var(--t3);font-weight:500}
+.sw-counter[data-warn]{color:var(--r)}
 
 /* Textarea */
-.sw-textarea{width:100%;padding:12px 14px;border:1.5px solid var(--bl);border-radius:10px;font-size:13px;font-family:inherit;color:var(--t1);background:var(--s2);resize:vertical;transition:all .2s ease;box-sizing:border-box;line-height:1.6}
-.sw-textarea:focus{outline:none;border-color:var(--p);box-shadow:0 0 0 3px var(--pg);background:var(--s)}
+.sw-textarea{width:100%;padding:12px 14px;border:1.5px solid var(--bl);border-radius:10px;font-size:13px;font-family:inherit;color:var(--t1);background:var(--s2);resize:vertical;transition:all .2s;box-sizing:border-box;line-height:1.65}
+.sw-textarea:focus{outline:none;border-color:var(--p);box-shadow:0 0 0 3px rgba(124,58,237,.08);background:var(--s)}
 .sw-textarea::placeholder{color:var(--t3)}
 
-/* Examples */
-.sw-examples{margin-top:10px}
-.sw-examples-l{font-size:10px;color:var(--t3);font-weight:600;display:block;margin-bottom:6px}
-.sw-examples-list{display:flex;gap:6px;flex-wrap:wrap}
-.sw-example-tag{padding:4px 10px;border-radius:7px;border:1px solid var(--bl);background:var(--s);font-size:10px;color:var(--t2);cursor:pointer;font-family:inherit;transition:all .15s ease;display:inline-flex;align-items:center;gap:4px}
-.sw-example-tag:hover{border-color:var(--pl);color:var(--p);background:var(--pbg)}
+/* Quick fill */
+.sw-quick{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--bl)}
+.sw-quick-label{font-size:10px;color:var(--t3);font-weight:600}
+.sw-quick-tag{padding:4px 10px;border-radius:6px;border:1px solid var(--bl);background:var(--s);font-size:10px;color:var(--t2);cursor:pointer;font-family:inherit;transition:all .15s;display:inline-flex;gap:3px;align-items:center}
+.sw-quick-tag:hover{border-color:var(--p);color:var(--p);background:var(--pbg);transform:translateY(-1px)}
 
-/* Detail row */
-.sw-detail-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.sw-detail-item{background:var(--s);border:1px solid var(--bl);border-radius:10px;padding:10px 12px}
-.sw-detail-label{font-size:11px;font-weight:600;color:var(--t2);display:flex;align-items:center;gap:4px;margin-bottom:6px}
-.sw-opt-tag{font-size:9px;color:var(--t3);background:var(--s2);padding:1px 5px;border-radius:3px;font-weight:500}
+/* Fields row */
+.sw-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.sw-field{background:var(--s);border:1px solid var(--bl);border-radius:10px;padding:12px 14px}
+.sw-field-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;font-size:11px;font-weight:600;color:var(--t2)}
+.sw-field-opt{font-size:9px;color:var(--t3);background:var(--s3);padding:2px 6px;border-radius:4px}
 
 /* Input */
-.sw-input{width:100%;padding:8px 10px;border:1px solid var(--bl);border-radius:7px;font-size:12px;font-family:inherit;color:var(--t1);background:var(--s2);transition:all .15s ease;box-sizing:border-box}
-.sw-input:focus{outline:none;border-color:var(--p);background:var(--s)}
-.sw-input::placeholder{color:var(--t3)}
-.sw-input.compact{font-size:11px;padding:6px 8px;border-radius:6px;margin-bottom:6px}
+.sw-ipt{width:100%;padding:8px 10px;border:1.5px solid var(--bl);border-radius:8px;font-size:12px;font-family:inherit;color:var(--t1);background:var(--s2);transition:all .15s;box-sizing:border-box}
+.sw-ipt:focus{outline:none;border-color:var(--p);box-shadow:0 0 0 3px rgba(124,58,237,.06);background:var(--s)}
+.sw-ipt::placeholder{color:var(--t3)}
+.sw-ipt.sm{font-size:11px;padding:6px 8px;border-radius:6px;margin-bottom:6px}
 
-/* Styles vertical */
-.sw-styles-v{display:flex;flex-direction:column;gap:6px}
-.sw-style-v{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1.5px solid var(--bl);cursor:pointer;transition:all .2s ease;position:relative}
-.sw-style-v:hover{border-color:var(--sc);background:color-mix(in srgb,var(--sc) 4%,transparent)}
-.sw-style-v.on{border-color:var(--sc);background:color-mix(in srgb,var(--sc) 8%,transparent)}
-.sw-style-v-emoji{font-size:20px;width:32px;height:32px;border-radius:8px;background:var(--s2);display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.sw-style-v.on .sw-style-v-emoji{background:color-mix(in srgb,var(--sc) 15%,transparent)}
-.sw-style-v-info{flex:1;min-width:0}
-.sw-style-v-name{font-size:12px;font-weight:700;color:var(--t1)}
-.sw-style-v-desc{font-size:10px;color:var(--t3)}
-.sw-style-v-check{width:18px;height:18px;border-radius:50%;background:var(--sc);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
+/* CTA button */
+.sw-cta{position:relative;width:100%;padding:14px;border-radius:12px;border:none;background:linear-gradient(135deg,#7C3AED,#6D28D9,#5B21B6);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;overflow:hidden;transition:all .25s;box-shadow:0 4px 20px rgba(124,58,237,.3)}
+.sw-cta:hover{transform:translateY(-1px);box-shadow:0 6px 28px rgba(124,58,237,.4)}
+.sw-cta:disabled{opacity:.5;cursor:default;transform:none}
+.sw-cta-shine{position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.1),transparent);animation:swShine 3s infinite}
+@keyframes swShine{0%{left:-100%}100%{left:200%}}
+.sw-cta-inner{position:relative;display:flex;align-items:center;justify-content:center;gap:8px}
+.sw-cta-icon{display:inline-flex;width:24px;height:24px;border-radius:6px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px}
 
-/* Duration */
-.sw-dur-val{margin-left:auto;font-size:14px;font-weight:800;color:var(--p)}
-.sw-range-wrap{position:relative;height:20px;margin-bottom:2px}
-.sw-range{position:absolute;top:0;left:0;width:100%;height:20px;opacity:0;cursor:pointer;z-index:2;margin:0}
-.sw-range-bar{position:absolute;top:8px;left:0;right:0;height:4px;background:var(--s3);border-radius:2px;overflow:hidden}
-.sw-range-fill{height:100%;background:linear-gradient(90deg,var(--p),var(--pl));border-radius:2px;transition:width .1s}
-.sw-range-labels{display:flex;justify-content:space-between;font-size:9px;color:var(--t3);margin-top:2px}
+/* Style list */
+.sw-style-list{display:flex;flex-direction:column;gap:6px}
+.sw-sty{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1.5px solid var(--bl);cursor:pointer;transition:all .2s;position:relative}
+.sw-sty:hover{border-color:var(--sc);background:var(--sbg)}
+.sw-sty.on{border-color:var(--sc);background:var(--sbg);box-shadow:0 2px 10px color-mix(in srgb,var(--sc) 15%,transparent)}
+.sw-sty-dot{width:8px;height:8px;border-radius:50%;background:var(--sc);opacity:.4;flex-shrink:0;transition:all .2s}
+.sw-sty.on .sw-sty-dot{opacity:1;box-shadow:0 0 0 3px color-mix(in srgb,var(--sc) 20%,transparent)}
+.sw-sty-info{flex:1}
+.sw-sty-name{font-size:12px;font-weight:700;color:var(--t1);display:block}
+.sw-sty-desc{font-size:10px;color:var(--t3);display:block}
+.sw-sty-check{width:18px;height:18px;border-radius:50%;background:var(--sc);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
 
-/* Hooks */
-.sw-hooks{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.sw-hook{padding:8px 6px;border-radius:8px;border:1.5px solid var(--bl);background:var(--s);font-size:11px;font-weight:500;color:var(--t2);cursor:pointer;font-family:inherit;transition:all .15s ease;display:flex;align-items:center;gap:4px;justify-content:center}
-.sw-hook:hover{border-color:var(--pl);color:var(--p)}
-.sw-hook.on{border-color:var(--p);background:var(--pbg);color:var(--p);font-weight:700}
-.sw-hook-icon{font-size:12px}
+/* Duration slider */
+.sw-dur-num{margin-left:auto;font-size:18px;font-weight:800;color:var(--p);line-height:1}
+.sw-dur-num small{font-size:10px;font-weight:600;color:var(--t3);margin-left:1px}
+.sw-slider-track{position:relative;height:6px;background:var(--s3);border-radius:3px;overflow:visible;margin:4px 0 8px}
+.sw-slider-fill{position:absolute;top:0;left:0;height:100%;background:linear-gradient(90deg,var(--p),var(--pl));border-radius:3px;transition:width .1s;pointer-events:none}
+.sw-slider{position:absolute;top:-7px;left:0;width:100%;height:20px;opacity:0;cursor:pointer;margin:0;z-index:2}
+.sw-slider-labels{display:flex;gap:4px}
+.sw-slider-labels span{flex:1;text-align:center;font-size:9px;color:var(--t3);padding:3px 0;border-radius:4px;transition:all .15s}
+.sw-slider-labels span.on{color:var(--p);background:var(--pbg);font-weight:600}
 
-/* ===== Error ===== */
-.sw-error{padding:10px 14px;border-radius:10px;background:#FEF2F2;border:1px solid #FECACA;color:var(--r);font-size:12px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between}
-.sw-error-x{background:none;border:none;color:var(--r);cursor:pointer;font-size:13px}
+/* Hook grid */
+.sw-hook-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.sw-hk{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 6px;border-radius:10px;border:1.5px solid var(--bl);background:var(--s);cursor:pointer;font-family:inherit;transition:all .2s}
+.sw-hk:hover{border-color:var(--pl);background:var(--pbg)}
+.sw-hk.on{border-color:var(--p);background:var(--pbg);box-shadow:0 2px 8px rgba(124,58,237,.1)}
+.sw-hk-icon{font-size:18px}
+.sw-hk-label{font-size:10px;font-weight:600;color:var(--t2)}
+.sw-hk.on .sw-hk-label{color:var(--p)}
 
-/* ===== Phases ===== */
-.sw-phases{display:flex;align-items:center;justify-content:center;gap:0;padding:12px 16px;margin-bottom:14px;background:var(--s);border:1px solid var(--bl);border-radius:10px}
+/* ===== ERROR ===== */
+.sw-error{margin:12px 28px 0;padding:10px 16px;border-radius:10px;background:linear-gradient(135deg,#FEF2F2,#FEE2E2);border:1px solid #FECACA;color:var(--r);font-size:12px;display:flex;align-items:center;justify-content:space-between}
+.sw-error-x{background:none;border:none;color:var(--r);cursor:pointer;font-size:14px}
+
+/* ===== PHASES ===== */
+.sw-phases{display:flex;align-items:center;justify-content:center;gap:0;padding:14px 20px;margin:12px 28px 0;background:var(--s);border:1px solid var(--bl);border-radius:12px}
 .sw-phase{display:flex;align-items:center;gap:5px}
-.sw-phase-dot{width:28px;height:28px;border-radius:50%;border:2px solid var(--bl);display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--s);transition:all .3s}
+.sw-phase-dot{width:30px;height:30px;border-radius:50%;border:2px solid var(--bl);display:flex;align-items:center;justify-content:center;font-size:13px;background:var(--s);transition:all .3s}
 .sw-phase.done .sw-phase-dot{background:var(--g);border-color:var(--g);color:#fff;font-size:10px}
-.sw-phase.on .sw-phase-dot{background:var(--p);border-color:var(--p);box-shadow:0 0 0 3px var(--pg);animation:swPulse 2s infinite}
-@keyframes swPulse{0%,100%{box-shadow:0 0 0 3px var(--pg)}50%{box-shadow:0 0 0 6px rgba(124,58,237,.05)}}
+.sw-phase.on .sw-phase-dot{background:linear-gradient(135deg,var(--p),var(--pl));border-color:transparent;color:#fff;box-shadow:0 0 0 4px rgba(124,58,237,.12);animation:swPulse 2s infinite}
+@keyframes swPulse{0%,100%{box-shadow:0 0 0 4px rgba(124,58,237,.12)}50%{box-shadow:0 0 0 8px rgba(124,58,237,.04)}}
 .sw-phase-label{font-size:11px;font-weight:500;color:var(--t3)}
-.sw-phase.done .sw-phase-label{color:var(--g)}.sw-phase.on .sw-phase-label{color:var(--p);font-weight:700}
-.sw-phase-line{width:32px;height:2px;background:var(--bl);margin:0 6px;border-radius:1px}
-.sw-phase.done .sw-phase-line{background:var(--g)}
+.sw-phase.done .sw-phase-label{color:var(--g);font-weight:600}
+.sw-phase.on .sw-phase-label{color:var(--p);font-weight:700}
+.sw-phase-line{width:36px;height:2px;background:var(--bl);margin:0 8px;border-radius:1px;transition:background .3s}
+.sw-phase-line.done{background:var(--g)}
 
-/* ===== Generating ===== */
-.sw-gen-center{display:flex;justify-content:center;align-items:center;min-height:320px}
-.sw-gen-card{background:var(--s);border:1px solid var(--bl);border-radius:16px;padding:28px 36px;max-width:420px;width:100%;text-align:center;position:relative;overflow:hidden}
-.sw-gen-glow{position:absolute;top:-60px;left:50%;transform:translateX(-50%);width:180px;height:180px;border-radius:50%;background:var(--p);opacity:.06;filter:blur(40px)}
-.sw-gen-emoji{font-size:40px;margin-bottom:10px;position:relative;animation:swBounce 2s infinite}
-@keyframes swBounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
-.sw-gen-msg{font-size:13px;font-weight:600;color:var(--t1);margin-bottom:6px;position:relative}
-.sw-gen-sub{font-size:11px;color:var(--t3);margin-bottom:14px}
-.sw-gen-agents{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:14px}
-.sw-agent{font-size:11px;color:var(--t3);padding:4px 10px;background:var(--s2);border-radius:6px;transition:all .3s}
-.sw-agent.on{color:var(--p);background:var(--pbg);font-weight:700}
-.sw-agent-arrow{font-size:10px;color:var(--t3)}
-.sw-gen-bar{height:4px;background:var(--s3);border-radius:2px;overflow:hidden}
-.sw-gen-bar-fill{height:100%;width:100%;background:linear-gradient(90deg,var(--p),var(--pl),#A78BFA);border-radius:2px;background-size:200% 100%;animation:swShimmer 1.5s linear infinite}
-@keyframes swShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+/* ===== GENERATING ===== */
+.sw-gen-wrap{display:flex;justify-content:center;align-items:center;min-height:360px;padding:24px}
+.sw-gen-card{position:relative;background:var(--s);border:1px solid var(--bl);border-radius:20px;padding:36px 48px;max-width:440px;width:100%;text-align:center;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.04)}
+.sw-gen-bg{position:absolute;inset:0;background:linear-gradient(135deg,rgba(124,58,237,.03),rgba(139,92,246,.02));pointer-events:none}
+.sw-gen-rings{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none}
+.sw-gen-ring{position:absolute;border-radius:50%;border:1.5px solid rgba(124,58,237,.08);top:50%;left:50%;transform:translate(-50%,-50%)}
+.sw-gen-ring.r1{width:120px;height:120px;animation:swRing 4s linear infinite}
+.sw-gen-ring.r2{width:200px;height:200px;animation:swRing 6s linear infinite reverse}
+.sw-gen-ring.r3{width:280px;height:280px;animation:swRing 8s linear infinite}
+@keyframes swRing{from{transform:translate(-50%,-50%) rotate(0)}to{transform:translate(-50%,-50%) rotate(360deg)}}
+.sw-gen-emoji{font-size:44px;margin-bottom:12px;position:relative;animation:swBounce 2s ease-in-out infinite}
+@keyframes swBounce{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-6px) scale(1.05)}}
+.sw-gen-msg{font-size:14px;font-weight:600;color:var(--t1);margin-bottom:8px;position:relative}
+.sw-gen-sub{font-size:11px;color:var(--t3);margin-bottom:14px;position:relative}
+.sw-gen-agents{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:16px;position:relative}
+.sw-ga{font-size:11px;color:var(--t3);padding:5px 12px;background:var(--s2);border-radius:8px;border:1px solid var(--bl);transition:all .3s}
+.sw-ga.on{color:var(--p);background:var(--pbg);border-color:rgba(124,58,237,.2);font-weight:700;box-shadow:0 2px 8px rgba(124,58,237,.1)}
+.sw-gen-bar{height:4px;background:var(--s3);border-radius:2px;overflow:hidden;position:relative}
+.sw-gen-bar-fill{height:100%;width:100%;background:linear-gradient(90deg,var(--p),var(--pl),#A78BFA,var(--p));border-radius:2px;background-size:300% 100%;animation:swShimmer 2s linear infinite}
+@keyframes swShimmer{0%{background-position:300% 0}100%{background-position:0 0}}
 
-/* ===== Review toolbar ===== */
-.sw-review{margin-top:4px}
-.sw-toolbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--s);border:1px solid var(--bl);border-radius:10px;margin-bottom:12px;flex-wrap:wrap;gap:8px}
-.sw-toolbar-l{display:flex;align-items:center;gap:12px}
-.sw-toolbar-count{font-size:13px;font-weight:700;color:var(--t1)}
-.sw-toolbar-progress{display:flex;align-items:center;gap:8px}
-.sw-toolbar-bar{width:60px;height:4px;background:var(--s3);border-radius:2px;overflow:hidden}
-.sw-toolbar-bar-fill{height:100%;background:var(--g);border-radius:2px;transition:width .3s}
-.sw-toolbar-pct{font-size:10px;color:var(--t3);font-weight:600}
-.sw-toolbar-cost{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--p);font-weight:600;padding:3px 10px;background:var(--pbg);border-radius:6px}
-.sw-toolbar-cost-d{font-size:10px;color:var(--t3);font-weight:400}
-.sw-toolbar-r{display:flex;align-items:center;gap:8px}
+/* ===== REVIEW SECTION ===== */
+.sw-review-sec{padding:16px 28px}
 
-.sw-progress-msg{font-size:11px;color:var(--p);font-weight:500;margin-bottom:10px;padding:6px 12px;background:var(--pbg);border-radius:7px;display:inline-block}
+/* Toolbar */
+.sw-tb{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--s);border:1px solid var(--bl);border-radius:12px;margin-bottom:14px;flex-wrap:wrap;gap:8px}
+.sw-tb-left{display:flex;align-items:center;gap:10px}
+.sw-tb-stat{display:flex;align-items:baseline;gap:3px}
+.sw-tb-num{font-size:20px;font-weight:800;color:var(--p)}
+.sw-tb-lbl{font-size:10px;color:var(--t3)}
+.sw-tb-divider{width:1px;height:24px;background:var(--bl)}
+.sw-tb-progress-wrap{display:flex;align-items:center;gap:6px}
+.sw-tb-ring{position:relative;width:32px;height:32px}
+.sw-tb-ring svg{width:100%;height:100%;transform:rotate(0)}
+.sw-tb-ring-num{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:var(--g)}
+.sw-tb-cost{display:flex;flex-direction:column;gap:1px}
+.sw-tb-cost-total{font-size:14px;font-weight:800;color:var(--p)}
+.sw-tb-right{display:flex;align-items:center;gap:8px}
 
-/* ===== Frame grid ===== */
-.sw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.sw-prog-bar{padding:6px 14px;background:linear-gradient(90deg,var(--pbg),rgba(237,233,254,.4));border-radius:8px;margin-bottom:12px;border-left:3px solid var(--p)}
+.sw-prog-text{font-size:11px;color:var(--p);font-weight:500}
 
-.sw-frame{background:var(--s);border:1.5px solid var(--bl);border-radius:12px;overflow:hidden;transition:all .2s ease}
-.sw-frame:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.05)}
-.sw-frame.approved{border-color:#22c55e50}
-.sw-frame.rejected{border-color:rgba(239,68,68,.35)}
+/* ===== FRAME GRID ===== */
+.sw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
 
-.sw-frame-img-wrap{position:relative;aspect-ratio:16/9;background:linear-gradient(135deg,var(--s2),var(--s3));display:flex;align-items:center;justify-content:center;overflow:hidden}
-.sw-frame-img{width:100%;height:100%;object-fit:cover}
-.sw-frame-img-ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
-.sw-frame-ph-num{font-size:28px;font-weight:900;color:var(--bl);opacity:.6}
-.sw-frame-overlay{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:flex-start;padding:8px 10px}
-.sw-frame-num{font-size:10px;font-weight:700;color:#fff;background:rgba(0,0,0,.45);padding:2px 8px;border-radius:5px;backdrop-filter:blur(4px)}
-.sw-frame-badge{font-size:9px;font-weight:600;padding:2px 7px;border-radius:5px;backdrop-filter:blur(4px)}
-.sw-frame-badge.pending{background:rgba(255,255,255,.8);color:var(--t3)}
-.sw-frame-badge.approved{background:rgba(34,197,94,.85);color:#fff}
-.sw-frame-badge.rejected{background:rgba(239,68,68,.85);color:#fff}
-.sw-frame-badge.regenerating{background:rgba(124,58,237,.85);color:#fff}
+.sw-frame{background:var(--s);border:1.5px solid var(--bl);border-radius:14px;overflow:hidden;transition:all .25s}
+.sw-frame:hover{transform:translateY(-3px);box-shadow:0 8px 28px rgba(0,0,0,.06)}
+.sw-frame.approved{border-color:#22c55e60;box-shadow:inset 0 0 0 1px #22c55e15}
+.sw-frame.rejected{border-color:#EF444450}
 
-.sw-frame-body{padding:10px 12px}
-.sw-frame-visual{font-size:11px;color:var(--t1);line-height:1.5;margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.sw-frame-narr{font-size:10px;color:var(--t2);font-style:italic;line-height:1.4;margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
-.sw-frame-meta{display:flex;gap:10px;font-size:9px;color:var(--t3)}
+.sw-frame-vis{position:relative;aspect-ratio:16/9;background:linear-gradient(145deg,var(--s3),var(--s2));overflow:hidden}
+.sw-frame-img{width:100%;height:100%;object-fit:cover;transition:transform .3s}
+.sw-frame:hover .sw-frame-img{transform:scale(1.03)}
+.sw-frame-ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;background:linear-gradient(145deg,var(--s3),var(--s2))}
+.sw-frame-ph-n{font-size:32px;font-weight:900;color:var(--bl)}
+.sw-frame-top-bar{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;padding:8px 10px;background:linear-gradient(180deg,rgba(0,0,0,.35),transparent);pointer-events:none}
+.sw-frame-num{font-size:10px;font-weight:700;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.3)}
+.sw-badge{font-size:9px;font-weight:600;padding:2px 8px;border-radius:5px;backdrop-filter:blur(6px)}
+.sw-badge.pending{background:rgba(255,255,255,.75);color:var(--t3)}
+.sw-badge.approved{background:rgba(34,197,94,.9);color:#fff}
+.sw-badge.rejected{background:rgba(239,68,68,.9);color:#fff}
+.sw-badge.regenerating{background:rgba(124,58,237,.9);color:#fff}
+.sw-frame-meta-bar{position:absolute;bottom:0;left:0;right:0;display:flex;gap:10px;padding:6px 10px;background:linear-gradient(0deg,rgba(0,0,0,.4),transparent);font-size:9px;color:rgba(255,255,255,.85);font-weight:500}
 
-.sw-frame-actions{border-top:1px solid var(--bl);padding-top:8px;margin-top:6px}
+.sw-frame-content{padding:10px 12px}
+.sw-frame-prompt{font-size:11px;color:var(--t1);line-height:1.5;margin:0 0 4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sw-frame-narr{font-size:10px;color:var(--t2);font-style:italic;line-height:1.4;margin:0;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+
+.sw-frame-act{margin-top:8px;padding-top:8px;border-top:1px dashed var(--bl)}
 .sw-frame-btns{display:flex;gap:4px}
-.sw-fbtn{width:32px;height:28px;border-radius:6px;border:1px solid var(--bl);background:var(--s);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:all .15s;flex:1}
-.sw-fbtn.approve{color:#16a34a;border-color:#22c55e50}
-.sw-fbtn.approve:hover{background:#22c55e15;border-color:#22c55e}
-.sw-fbtn.reject{color:var(--r);border-color:rgba(239,68,68,.3)}
-.sw-fbtn.reject:hover{background:rgba(239,68,68,.08);border-color:var(--r)}
-.sw-fbtn.regen{color:var(--p);border-color:var(--pl)30}
-.sw-fbtn.regen:hover{background:var(--pbg);border-color:var(--pl)}
+.sw-abtn{display:flex;align-items:center;justify-content:center;gap:3px;flex:1;padding:6px 0;border-radius:7px;border:1.5px solid var(--bl);background:var(--s);cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;transition:all .15s}
+.sw-abtn.ok{color:#16a34a;border-color:#86EFAC50}
+.sw-abtn.ok:hover{background:#22c55e10;border-color:#22c55e;transform:translateY(-1px)}
+.sw-abtn.no{color:var(--r);border-color:#FCA5A550}
+.sw-abtn.no:hover{background:#EF444408;border-color:var(--r);transform:translateY(-1px)}
+.sw-abtn.re{color:var(--p);border-color:rgba(124,58,237,.2);flex:0 0 36px}
+.sw-abtn.re:hover{background:var(--pbg);border-color:var(--pl);transform:translateY(-1px)}
 
-.sw-spinner{display:inline-block;width:18px;height:18px;border:2px solid var(--bl);border-top-color:var(--p);border-radius:50%;animation:swSpin 1s linear infinite}
+.sw-spin{display:inline-block;width:20px;height:20px;border:2.5px solid var(--bl);border-top-color:var(--p);border-radius:50%;animation:swSpin 1s linear infinite}
 @keyframes swSpin{to{transform:rotate(360deg)}}
 
-/* ===== Done ===== */
-.sw-done-layout{display:grid;grid-template-columns:1fr 200px;gap:16px;align-items:start}
-.sw-done-card{background:var(--s);border:1px solid var(--bl);border-radius:14px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.04)}
-.sw-done-badge{padding:10px 16px;font-size:13px;font-weight:700;text-align:center;background:linear-gradient(135deg,var(--pbg),#EDE9FE)}
+/* ===== DONE ===== */
+.sw-done-wrap{padding:20px 28px;display:flex;flex-direction:column;gap:16px;align-items:center}
+.sw-done-card{position:relative;background:var(--s);border:1px solid var(--bl);border-radius:18px;overflow:hidden;width:100%;max-width:640px;box-shadow:0 8px 40px rgba(0,0,0,.06)}
+.sw-done-glow{position:absolute;top:-40px;left:50%;transform:translateX(-50%);width:300px;height:100px;background:linear-gradient(135deg,var(--p),var(--pl));opacity:.06;filter:blur(40px);border-radius:50%;pointer-events:none}
+.sw-done-header{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;font-size:15px;font-weight:700;background:linear-gradient(135deg,#F5F0FF,#EDE9FE);position:relative}
+.sw-done-icon{font-size:20px}
 .sw-done-player{background:#000;aspect-ratio:16/9}
 .sw-video{width:100%;height:100%;object-fit:contain}
-.sw-done-info{padding:14px 18px}
-.sw-done-title{font-size:16px;font-weight:800;margin-bottom:4px}
-.sw-done-meta{display:flex;gap:12px;font-size:11px;color:var(--t3);margin-bottom:14px}
-.sw-done-acts{display:flex;gap:8px}
-.sw-done-acts .sw-btn{flex:1;justify-content:center}
+.sw-done-info{padding:16px 20px}
+.sw-done-meta{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.sw-done-chip{font-size:11px;padding:4px 10px;border-radius:6px;background:var(--s2);color:var(--t2);border:1px solid var(--bl);font-weight:500}
+.sw-done-btns{display:flex;gap:10px}
+.sw-done-btns .sw-btn{flex:1;justify-content:center}
 
-.sw-done-thumbs{background:var(--s);border:1px solid var(--bl);border-radius:14px;padding:12px;overflow:hidden}
-.sw-done-thumbs-title{font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px}
-.sw-done-thumb{border-radius:8px;overflow:hidden;margin-bottom:8px;position:relative;aspect-ratio:16/9;background:var(--s3)}
+.sw-done-strip{background:var(--s);border:1px solid var(--bl);border-radius:14px;padding:12px 16px;width:100%;max-width:640px}
+.sw-done-strip-title{font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px}
+.sw-done-strip-scroll{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.sw-done-strip-scroll::-webkit-scrollbar{height:3px}
+.sw-done-strip-scroll::-webkit-scrollbar-thumb{background:var(--b);border-radius:2px}
+.sw-done-thumb{flex-shrink:0;width:110px;border-radius:8px;overflow:hidden;position:relative;aspect-ratio:16/9;background:var(--s3)}
 .sw-done-thumb img{width:100%;height:100%;object-fit:cover}
-.sw-done-thumb-info{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;padding:4px 8px;background:linear-gradient(transparent,rgba(0,0,0,.6));color:#fff;font-size:9px;font-weight:600}
+.sw-done-thumb span{position:absolute;bottom:4px;left:6px;font-size:10px;font-weight:700;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.5)}
 
 /* Responsive */
-@media(max-width:768px){
-  .sw-input-layout{grid-template-columns:1fr}
-  .sw-done-layout{grid-template-columns:1fr}
-  .sw-done-thumbs{display:none}
-  .sw-topbar-tags{display:none}
+@media(max-width:820px){
+  .sw-input-layout{grid-template-columns:1fr;padding:16px}
+  .sw-hero{padding:16px}
+  .sw-review-sec{padding:12px}
+  .sw-done-wrap{padding:12px}
+  .sw-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:500px){
+  .sw-grid{grid-template-columns:1fr}
+  .sw-fields{grid-template-columns:1fr}
 }
 `;
