@@ -140,6 +140,15 @@ export default function App(){
   const [prodImages,setProdImages]=useState([]); // 用户上传的产品实拍图(data URI)
   const [prodDesc,setProdDesc]=useState(""); // 用户填写的产品描述/卖点
   const [charRefImg,setCharRefImg]=useState(null); // AI生成的主角参考图(URL)
+  const [avatarOn,setAvatarOn]=useState(false);
+  const [avatarSel,setAvatarSel]=useState(null); // selected preset avatar object {id,nm,imgUrl,imgPrompt,...}
+  const AVATAR_PRESETS = [
+    { id: "p1", nm: "商务男", tags: "商务·专业", imgUrl: "/avatars/p1.png", imgPrompt: "Portrait photo of a 32 year old Chinese man in a dark navy suit and light blue shirt, natural indoor lighting, relaxed confident smile, looking at camera, head and shoulders" },
+    { id: "p2", nm: "知性女", tags: "知性·优雅", imgUrl: "/avatars/p2.png", imgPrompt: "Portrait photo of a 30 year old Chinese woman wearing a beige knit cardigan over white top, soft natural daylight, gentle warm smile, looking at camera, head and shoulders" },
+    { id: "p3", nm: "活力少女", tags: "青春·活泼", imgUrl: "/avatars/p3.png", imgPrompt: "Portrait photo of a 22 year old Chinese girl wearing a simple white t-shirt, bright natural daylight, big genuine smile, looking at camera, head and shoulders" },
+    { id: "p4", nm: "儒雅大叔", tags: "稳重·信赖", imgUrl: "/avatars/p4.png", imgPrompt: "Portrait photo of a 45 year old Chinese man wearing thin metal frame glasses and a charcoal crew neck sweater, warm indoor lighting, kind smile, looking at camera, head and shoulders" },
+    { id: "p5", nm: "甜美主播", tags: "甜美·带货", imgUrl: "/avatars/p5.png", imgPrompt: "Portrait photo of a 26 year old Chinese woman wearing a soft pink blouse, ring light setup, clean skin with light makeup, sweet friendly smile, looking at camera, head and shoulders" },
+  ];
   const [dataOn,setDataOn]=useState(true);
   const [adopted,setAdopted]=useState(null);
   const [showSc,setShowSc]=useState(false);
@@ -537,9 +546,16 @@ export default function App(){
   };
   const generateJSON=async(opts)=>{
     for(let i=0;i<3;i++){
-      const raw=await callLLM({...opts,jsonMode:true});
-      const parsed=extractJSON(raw);
-      if(parsed)return parsed;
+      try{
+        const raw=await callLLM({...opts,jsonMode:i===0}); // 第2、3次不强制JSON模式
+        console.log(`[generateJSON] attempt ${i+1}, raw length: ${raw?.length}, first 200: ${raw?.slice(0,200)}`);
+        const parsed=extractJSON(raw);
+        if(parsed)return parsed;
+        console.warn(`[generateJSON] attempt ${i+1} parse failed, raw: ${raw?.slice(0,500)}`);
+      }catch(e){
+        console.error(`[generateJSON] attempt ${i+1} error:`,e.message);
+        if(i===2)throw e;
+      }
       opts={...opts,temperature:Math.max(0.1,(opts.temperature||0.7)-0.2)};
     }
     throw new Error("JSON解析失败，请重试");
@@ -605,9 +621,16 @@ export default function App(){
       else if(/酷|冷|科技|neon/i.test(r.scene)){lighting="neon";mood="energetic";}
       else if(/奢华|高端|luxur/i.test(r.scene)){lighting="dramatic";mood="luxurious";}
       else if(/紧迫|限时|urgency/i.test(r.intent||"")){mood="urgent";}
+      // 智能判断shot_type：AI返回的字段 > 场景文字检测 > 默认product
+      let shotType=r.shot_type||"product";
+      if(shotType==="product"&&avatarOn&&/主播|博主|出镜|口播|presenter|面对镜头|对镜头|拿着.*说|举着.*说|手持.*展示/i.test(r.scene||""))shotType="presenter";
+      // presenter镜头直接用avatar图，不需要AI生图
+      const isPresenter=shotType==="presenter"&&avatarOn&&avatarSel;
       return{text:r.copy,scene:r.scene,dur:r.dur,intent:r.intent,tag,camera,lighting,mood,
-        imageUrl:null,imageVersions:[],audioUrl:null,videoUrl:null,imgPrompt:r.image_prompt||"",
-        status:"pending",feedback:""};
+        shotType,
+        imageUrl:isPresenter?(avatarSel.imgUrl||null):null,
+        imageVersions:[],audioUrl:null,videoUrl:null,imgPrompt:r.image_prompt||"",
+        status:isPresenter?"approved":"pending",feedback:""};
     });
     setSbShots(shots);
     // auto-select voice based on product category
@@ -623,6 +646,32 @@ export default function App(){
     if(item?.url)return item.url;
     if(item?.b64_json)return "data:image/png;base64,"+item.b64_json;
     throw new Error("未返回图片");
+  };
+  // Kling API helpers for digital human
+  const klingCreate=async(imageUrl,prompt,aspect="9:16",duration="10")=>{
+    const r=await fetch("/blt-proxy/kling/v1/videos/image2video",{method:"POST",headers:BLT_HDRS,body:JSON.stringify({model_name:"kling-v1",image:imageUrl,prompt,duration,aspect_ratio:aspect})});
+    if(!r.ok)throw new Error("Kling创建失败");
+    const j=await r.json();if(j.code!==0)throw new Error(j.message||"创建失败");
+    return j.data.task_id;
+  };
+  const klingPollResult=async(taskId,path="/kling/v1/videos/image2video")=>{
+    for(let i=0;i<120;i++){
+      await new Promise(r=>setTimeout(r,4000));
+      const r=await fetch(`/blt-proxy${path}/${taskId}`,{headers:BLT_HDRS});
+      const j=await r.json();const st=j.data?.task_status;
+      if(st==="succeed"){const url=j.data?.task_result?.videos?.[0]?.url;if(url)return url;throw new Error("无视频URL");}
+      if(st==="failed")throw new Error(j.data?.task_status_msg||"生成失败");
+    }
+    throw new Error("超时");
+  };
+  const klingLipSync=async(videoUrl,audioUrl)=>{
+    console.log("[klingLipSync] video:", videoUrl?.slice(0,80), "audio:", audioUrl?.slice(0,80));
+    const r=await fetch("/blt-proxy/kling/v1/videos/lip-sync",{method:"POST",headers:BLT_HDRS,body:JSON.stringify({input:{video_url:videoUrl,audio_url:audioUrl,audio_type:"url",mode:"audio2video"}})});
+    const txt=await r.text();
+    console.log("[klingLipSync] response status:", r.status, "body:", txt.slice(0,500));
+    if(!r.ok)throw new Error("LipSync创建失败: HTTP " + r.status + " " + txt.slice(0,200));
+    const j=JSON.parse(txt);if(j.code!==0)throw new Error(j.message||"创建失败 code="+j.code);
+    return j.data.task_id;
   };
   // Build visual anchor prefix from adopted script's visual_anchor field
   const getAnchorPrefix=()=>{
@@ -654,10 +703,10 @@ export default function App(){
       }catch(e){console.warn("[SB] 产品图分析失败:",e.message);}
     }
 
-    // Step 1: 生成主角参考图(保证全片人物一致)
+    // Step 1: 生成主角参考图(保证全片人物一致) — 数字人模式下跳过
     const anchor=adopted?.visual_anchor;
     let charRef=charRefImg;
-    if(!charRef&&anchor?.character&&anchor.character!=="none"){
+    if(!avatarOn&&!charRef&&anchor?.character&&anchor.character!=="none"){
       setSbGenStatus("生成主角形象参考图...");
       try{
         const charPrompt=`Character reference photo for short video. ${anchor.character}. In ${anchor.setting||"a clean modern room"}. ${anchor.palette||"Natural soft lighting, iPhone feel"}. Medium shot, 3/4 angle, natural smile. No text, no words, no labels, no logos anywhere.`;
@@ -676,6 +725,13 @@ export default function App(){
     let done=0;
     try{
       await Promise.all(sbShots.map((_,i)=>withSem(async()=>{
+        // 数字人口播镜头：跳过生图，直接用avatar图，后续走Kling+LipSync
+        if(sbShots[i].shotType==="presenter"&&avatarOn){
+          // 已在buildSbShots中设置了avatarImg和approved状态，直接跳过
+          done++;
+          setSbGenStatus(`分镜图 ${done}/${sbShots.length} 完成（口播镜头跳过生图）`);
+          return;
+        }
         setSbShots(prev=>{const n=[...prev];n[i]={...n[i],status:"generating"};return n;});
         let shotPrompt=sbShots[i].imgPrompt;
         if(!shotPrompt){
@@ -757,7 +813,18 @@ export default function App(){
         let imgPub=null,audioPub=null;
         try{
           if(sbShots[i].imageUrl){
-            imgPub=await uploadToTmp(sbShots[i].imageUrl.startsWith("data:")?await fetch(sbShots[i].imageUrl).then(r=>r.blob()):sbShots[i].imageUrl,`shot_${i+1}.png`);
+            const imgUrl=sbShots[i].imageUrl;
+            if(imgUrl.startsWith("http://")|| imgUrl.startsWith("https://")){
+              imgPub=imgUrl; // 已经是公开URL
+            }else if(imgUrl.startsWith("data:")){
+              imgPub=await uploadToTmp(await fetch(imgUrl).then(r=>r.blob()),`shot_${i+1}.png`);
+            }else{
+              // 本地路径（如/avatars/p5.png），需要先fetch转blob再上传
+              try{
+                const blob=await fetch(imgUrl).then(r=>r.blob());
+                imgPub=await uploadToTmp(blob,`shot_${i+1}.png`);
+              }catch(e2){console.warn(`[Video] Local image ${imgUrl} upload failed:`,e2.message);}
+            }
           }
           if(audioBlobs[i]){
             audioPub=await uploadToTmp(audioBlobs[i],`tts_${i+1}.mp3`);
@@ -774,6 +841,31 @@ export default function App(){
       const genOne=async(i)=>{
         const prompt=getAnchorPrefix()+(sbShots[i].imgPrompt||sbShots[i].scene||"product video, smooth camera motion");
         const dur=parseInt(sbShots[i].dur)||5;
+        // 数字人口播镜头：Kling图生视频 + LipSync对口型
+        if(sbShots[i].shotType==="presenter"&&avatarOn){
+          if(!publicUrls[i]?.imgPub){console.error(`[Video] presenter shot ${i+1}: 无图片URL，跳过`);return;}
+          if(!publicUrls[i]?.audioPub){console.error(`[Video] presenter shot ${i+1}: 无音频URL，跳过`);return;}
+          try{
+            setSbGenStatus(`数字人图生视频 ${i+1}/${total}（约2-3分钟）...`);
+            console.log(`[Video] presenter shot ${i+1}: imgPub=${publicUrls[i].imgPub.slice(0,60)}, audioPub=${publicUrls[i].audioPub.slice(0,60)}`);
+            const basePrompt="This person is talking to camera, natural head movements, slight expression changes, holding a product, presenting to viewer, Douyin vlog style, casual and friendly";
+            const baseTaskId=await klingCreate(publicUrls[i].imgPub,basePrompt,"9:16","10");
+            console.log(`[Video] presenter shot ${i+1}: Kling task=${baseTaskId}, polling...`);
+            const baseVideoUrl=await klingPollResult(baseTaskId);
+            console.log(`[Video] presenter shot ${i+1}: base video OK, starting lip-sync...`);
+            setSbGenStatus(`数字人对口型 ${i+1}/${total}（约2分钟）...`);
+            const lsTaskId=await klingLipSync(baseVideoUrl,publicUrls[i].audioPub);
+            console.log(`[Video] presenter shot ${i+1}: lip-sync task=${lsTaskId}, polling...`);
+            const finalUrl=await klingPollResult(lsTaskId,"/kling/v1/videos/lip-sync");
+            console.log(`[Video] presenter shot ${i+1}: lip-sync OK! url=${finalUrl.slice(0,60)}`);
+            videoUrls[i]=finalUrl;
+            setSbShots(prev=>{const n=[...prev];n[i]={...n[i],videoUrl:finalUrl};return n;});
+            return;
+          }catch(e){
+            console.error(`[Video] presenter shot ${i+1} failed:`,e.message);
+            setSbGenStatus(`数字人镜头 ${i+1} 失败: ${e.message}，降级为普通视频...`);
+          }
+        }
         // Try 速创API first (text-to-video, no image needed)
         try{
           const modelId=i===0?"sora2-new":"veo3.1-fast"; // hook shot uses higher quality
@@ -801,14 +893,27 @@ export default function App(){
           }
         }catch(e){console.error(`[Video] Kling ${i+1} failed:`,e);}
       };
-      // Launch all video generations in parallel (max 4 concurrent)
+      // 分开处理：presenter镜头串行（每个需要Kling图生视频+LipSync），product镜头并行
+      const presenterIdxs=sbShots.map((s,i)=>s.shotType==="presenter"?i:-1).filter(i=>i>=0);
+      const productIdxs=sbShots.map((s,i)=>s.shotType!=="presenter"?i:-1).filter(i=>i>=0);
+      console.log(`[Video] ${presenterIdxs.length} presenter shots, ${productIdxs.length} product shots`);
+
+      // Presenter镜头：逐个处理（每个约5分钟：图生视频2-3分+LipSync2分）
+      for(const i of presenterIdxs){
+        await genOne(i);
+        completedCount++;
+        setVgPct(35+Math.round((completedCount/total)*45));
+        setSbGenStatus(`视频片段 ${completedCount}/${total} 完成`);
+      }
+
+      // Product镜头：并行处理（max 4 concurrent）
       const sem={count:0,max:4,queue:[]};
       const withSem=async(fn)=>{
         while(sem.count>=sem.max)await new Promise(r=>sem.queue.push(r));
         sem.count++;
         try{await fn();}finally{sem.count--;if(sem.queue.length>0)sem.queue.shift()();}
       };
-      await Promise.all(sbShots.map((_,i)=>withSem(async()=>{
+      await Promise.all(productIdxs.map(i=>withSem(async()=>{
         await genOne(i);
         completedCount++;
         setVgPct(35+Math.round((completedCount/total)*45));
@@ -1451,7 +1556,340 @@ ${styleList}
     }
   };
 
+  // ═══════════════ Avatar (数字人) simplified creation flow ═══════════════
+  const startAvatarCreate = async () => {
+    setModal(false);setPg("create");setCs("ai-generating");setAiScripts([]);activeCreatePg.current="create";
+    const _startT=Date.now();const _tmr=setInterval(()=>setSbElapsed(Math.round((Date.now()-_startT)/1000)),1000);
+
+    try {
+      // ═══ Step 1: 净化产品图 — 白底电商主图 ═══
+      setAiGenStep("正在生成产品精修图（白底电商主图）...");
+      const cleanProductPrompt = `Product photography on pure white background. Take this exact product and render it on a perfectly clean white background. Front-facing view, eye-level angle. 3D render quality, precise color reproduction. Clean all fingerprints, dust and imperfections. Strong lighting with soft shadows for depth. Product labels and text must be sharp and clear. E-commerce hero image standard. The product: ${prodDesc || prod}. Reproduce the exact product from the reference, keep all original colors, materials (glass transparency, matte plastic, metallic shine), shape and proportions.`;
+
+      let cleanProductImg;
+      try {
+        cleanProductImg = await genOneImage(cleanProductPrompt);
+        console.log("[Avatar] Clean product image OK");
+      } catch(e) {
+        console.warn("[Avatar] Clean product image failed, using original:", e.message);
+        cleanProductImg = prodImages[0]; // fallback to original
+      }
+
+      // ═══ Step 2: 合成数字人+产品图 (9:16) ═══
+      setAiGenStep("正在生成数字人展示产品图...");
+      // 生成多张不同姿势的人+产品图，让Kling视频动作更丰富
+      const gender = (avatarSel.tags||"").includes("男") || (avatarSel.tags||"").includes("大叔") ? "He" : "She";
+      const genderCn = gender === "He" ? "他" : "她";
+      const productDesc = prodDesc || prod;
+      const poses = [
+        `${gender} holds the product up at chest height with right hand, left hand relaxed at side, looking directly at camera lens, mouth slightly open mid-sentence`,
+        `${gender} brings the product closer to camera to show details, tilting it slightly, eyebrows raised with genuine interest, leaning forward a bit`,
+        `${gender} holds the product with both hands near chest, natural relaxed smile, head tilted slightly to one side, casual confident pose`,
+      ];
+      const compositeImgs = [];
+      // 真实感prompt核心：强调iPhone自拍、皮肤瑕疵、真实房间背景
+      const realismBase = `RAW photo taken with iPhone 15 Pro front camera, completely unedited and unretouched. Visible skin pores on nose and cheeks, natural slight redness around nose, tiny beauty marks, individual hair strands visible, natural teeth with slight imperfections. NOT a beauty photo, NOT retouched, NOT smooth skin. Real candid selfie vibe. Real lived-in room background: visible furniture, door frame, ceiling light, maybe a plant or some clutter, natural depth. Mixed warm indoor lighting from overhead light and window. Slight noise/grain like a real phone photo. 9:16 vertical portrait format.`;
+      for (let pi = 0; pi < poses.length; pi++) {
+        setAiGenStep(`正在生成数字人展示图 ${pi+1}/${poses.length}...`);
+        const compositePrompt = `${realismBase} ${avatarSel.imgPrompt}. ${poses[pi]}. ${gender} is holding: ${productDesc}. No text, no watermarks, no labels overlaid on image.`;
+        try {
+          const img = await genOneImage(compositePrompt);
+          compositeImgs.push(img);
+          console.log(`[Avatar] Composite image ${pi+1} OK`);
+        } catch(e) {
+          console.warn(`[Avatar] Composite image ${pi+1} failed:`, e.message);
+          setAiGenStep(`展示图 ${pi+1} 失败: ${e.message}，继续尝试...`);
+        }
+      }
+      // 如果全部失败，用更简单的prompt再试一次
+      if (compositeImgs.length === 0) {
+        setAiGenStep("展示图生成失败，正在用简化方案重试...");
+        const simplePrompt = `RAW unedited iPhone selfie of a young Chinese person holding a ${prod}, looking at camera, real room background, visible skin pores, natural lighting, 9:16 vertical. No text no watermarks.`;
+        try {
+          const img = await genOneImage(simplePrompt);
+          compositeImgs.push(img);
+          console.log("[Avatar] Simple fallback image OK");
+        } catch(e2) {
+          // 最后的fallback：直接用avatar预设图
+          setAiGenStep("图片生成失败，使用预设头像...");
+          compositeImgs.push(avatarSel.imgUrl);
+          console.warn("[Avatar] All image gen failed, using preset avatar image");
+        }
+      }
+      const compositeImg = compositeImgs[0];
+
+      // ═══ Step 3: 生成口播脚本（纯文字，不要画面描述）═══
+      setAiGenStep("正在生成口播脚本...");
+      const scriptPrompt = `你是一位抖音带货口播文案高手。请为以下产品生成一段数字人口播文案。
+
+产品：${prod}（${cat}）
+${prodDesc ? "产品描述：" + prodDesc : ""}
+目标时长：${dur}
+数字人形象：${avatarSel.nm}（${avatarSel.tags}）
+
+要求：
+1. 只输出口播文案正文，不要标题、标注、画面描述、镜头说明
+2. 100%口语化，短句为主（每句≤15字），像真人在抖音上自然说话
+3. 开头必须有钩子（反问/痛点/悬念），3秒内抓住注意力
+4. 中间展示产品亮点（外观/质感/使用场景/性价比），层层递进
+5. 结尾软性逼单（"链接放这儿了""我已经囤了X个"）
+6. 字数根据时长：30秒≈120-150字，60秒≈240-300字
+7. 禁止书面语，禁止编造产品没有的功能
+8. 用"..."标注停顿，用"【重】"标注需要加重语气的词
+
+只输出文案，不要任何其他内容。`;
+
+      const script = await callLLM({model: "gemini-2.5-pro", prompt: scriptPrompt, temperature: 0.8, maxTokens: 2048});
+      const cleanScript = script.replace(/^["""「」『』\s]+|["""「」『』\s]+$/g, "").trim();
+      console.log("[Avatar] Script generated, length:", cleanScript.length);
+
+      // ═══ 展示结果 — 让用户审核脚本 ═══
+      clearInterval(_tmr);
+
+      // Store all data for the video generation step
+      const avatarData = {
+        cleanProductImg,
+        compositeImg,
+        compositeImgs, // 多张不同姿势
+        script: cleanScript,
+        avatarSel,
+      };
+
+      // Use aiScripts to store the result (reuse existing UI)
+      setAiScripts([{
+        id: 1,
+        name: `${avatarSel.nm} · ${prod}带货口播`,
+        dur: dur,
+        shots: 1,
+        sell: 0,
+        desc: "数字人口播带货视频 — 点击采纳后生成视频",
+        badges: [{t: "数字人", c: "conv"}, {t: "口播带货", c: "exp"}],
+        logic: ["产品精修图生成", "数字人+产品合成", "口播脚本生成", "→ 采纳后：TTS配音 → Kling图生视频 → 对口型"],
+        table: [{
+          shot: 1,
+          dur: dur,
+          scene: "数字人手持产品对镜头口播",
+          copy: cleanScript,
+          image_prompt: "",
+          shot_type: "presenter",
+          risk: false,
+          intent: "完整口播带货"
+        }],
+        visual_anchor: { character: avatarSel.imgPrompt, setting: "clean room", product: prodDesc || prod, palette: "natural" },
+        _avatarData: avatarData,
+      }]);
+      setCs("results");
+
+    } catch(e) {
+      console.error("[Avatar] startAvatarCreate error:", e);
+      clearInterval(_tmr);
+      alert("数字人视频生成失败: " + e.message);
+      setCs("results");
+      setAiScripts([]);
+    }
+  };
+
+  // ═══════════════ Avatar video generation (TTS → Kling → lip-sync) ═══════════════
+  const generateAvatarVideo = async () => {
+    if (!adopted?._avatarData) return;
+    setCs("generating");setVidGenBusy(true);setVgPct(0);setVgStep(0);setFinalVideoUrl(null);
+    const _startT=Date.now();const _tmr=setInterval(()=>setSbElapsed(Math.round((Date.now()-_startT)/1000)),1000);
+    try {
+      const ad = adopted._avatarData;
+      const imgs = ad.compositeImgs || [ad.compositeImg];
+
+      // ═══ Step 1: TTS + 测量音频时长 ═══
+      setVgStep(0);setSbGenStatus("生成TTS配音...");setVgPct(5);
+      const ttsR = await fetch("/edge-tts", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text: ad.script, voice: sbVoice})});
+      if(!ttsR.ok) throw new Error("TTS失败");
+      const ttsBlob = await ttsR.blob();
+      // 测量TTS音频时长
+      const ttsDur = await new Promise(resolve => {
+        const au = new Audio();
+        au.src = URL.createObjectURL(ttsBlob);
+        au.addEventListener("loadedmetadata", () => resolve(au.duration));
+        au.addEventListener("error", () => resolve(30)); // fallback 30s
+      });
+      console.log("[Avatar] TTS duration:", ttsDur, "seconds");
+      setVgPct(10);
+
+      // ═══ Step 2: 根据音频时长决定需要几个片段 ═══
+      const segCount = Math.max(1, Math.ceil(ttsDur / 10)); // 每段10秒
+      console.log("[Avatar] Need", segCount, "segments for", ttsDur, "s audio");
+      // 确保有足够的图（不够就循环使用）
+      const segImgs = [];
+      for (let i = 0; i < segCount; i++) segImgs.push(imgs[i % imgs.length]);
+
+      // ═══ Step 3: 上传图片 + 音频 ═══
+      setSbGenStatus("上传素材...");setVgStep(1);
+      const imgPubs = [];
+      const uploadedCache = {};
+      for (let i = 0; i < segImgs.length; i++) {
+        let url = segImgs[i];
+        if (uploadedCache[url]) { imgPubs.push(uploadedCache[url]); continue; }
+        if (!url.startsWith("http")) {
+          const blob = await fetch(url).then(r=>r.blob());
+          url = await uploadToTmp(blob, `avatar_pose_${i+1}.png`);
+        }
+        uploadedCache[segImgs[i]] = url;
+        imgPubs.push(url);
+      }
+      const audioPub = await uploadToTmp(ttsBlob, "tts.mp3");
+      setVgPct(15);
+
+      // ═══ Step 4: 把TTS音频按段切分 ═══
+      // 每段时长 = ttsDur / segCount，最后一段可能稍短
+      const segDur = ttsDur / segCount;
+      // 用Web Audio API切分音频
+      setSbGenStatus("切分口播音频...");
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const arrayBuf = await ttsBlob.arrayBuffer();
+      const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+      const segAudioPubs = [];
+      for (let i = 0; i < segCount; i++) {
+        const start = i * segDur;
+        const end = Math.min((i + 1) * segDur, ttsDur);
+        const len = end - start;
+        const sampleStart = Math.floor(start * audioBuf.sampleRate);
+        const sampleLen = Math.floor(len * audioBuf.sampleRate);
+        const offlineCtx = new OfflineAudioContext(audioBuf.numberOfChannels, sampleLen, audioBuf.sampleRate);
+        const source = offlineCtx.createBufferSource();
+        const segBuf = audioCtx.createBuffer(audioBuf.numberOfChannels, sampleLen, audioBuf.sampleRate);
+        for (let ch = 0; ch < audioBuf.numberOfChannels; ch++) {
+          const orig = audioBuf.getChannelData(ch);
+          const seg = segBuf.getChannelData(ch);
+          for (let s = 0; s < sampleLen && sampleStart + s < orig.length; s++) seg[s] = orig[sampleStart + s];
+        }
+        source.buffer = segBuf;
+        source.connect(offlineCtx.destination);
+        source.start();
+        const rendered = await offlineCtx.startRendering();
+        // 转成WAV blob
+        const wavBlob = audioBufferToWav(rendered);
+        const segUrl = await uploadToTmp(wavBlob, `tts_seg_${i+1}.wav`);
+        segAudioPubs.push(segUrl);
+        console.log(`[Avatar] Audio segment ${i+1}/${segCount}: ${start.toFixed(1)}-${end.toFixed(1)}s uploaded`);
+      }
+      audioCtx.close();
+      setVgPct(25);
+
+      // ═══ Step 5: 并行生成每段的Kling视频 ═══
+      setSbGenStatus(`生成${segCount}段数字人视频（约${segCount * 3}分钟）...`);setVgStep(2);
+      const poseDescs = [", presenting the product to camera", ", examining and showing product details", ", demonstrating the product with enthusiasm", ", gesturing while explaining the product", ", holding product up proudly"];
+      const basePrompt = "This person is talking directly to camera while holding and presenting a product, natural head movements, slight expression changes, friendly engaging Douyin vlog style";
+      // 并行提交所有Kling任务
+      const klingTasks = await Promise.all(imgPubs.map((url, i) =>
+        klingCreate(url, basePrompt + (poseDescs[i % poseDescs.length]), "9:16", "10")
+          .then(tid => { console.log(`[Avatar] Kling task ${i+1}: ${tid}`); return tid; })
+          .catch(e => { console.error(`[Avatar] Kling create ${i+1}:`, e.message); return null; })
+      ));
+      // 轮询结果
+      const baseVideoUrls = [];
+      for (let i = 0; i < klingTasks.length; i++) {
+        if (!klingTasks[i]) { baseVideoUrls.push(null); continue; }
+        setSbGenStatus(`数字人视频 ${i+1}/${segCount} 生成中...`);
+        try {
+          const url = await klingPollResult(klingTasks[i]);
+          baseVideoUrls.push(url);
+        } catch(e) { console.warn(`[Avatar] Video ${i+1} failed:`, e.message); baseVideoUrls.push(null); }
+        setVgPct(25 + Math.round(((i+1)/segCount) * 30));
+      }
+      if (baseVideoUrls.every(u => !u)) throw new Error("所有基础视频生成失败");
+      setVgPct(55);
+
+      // ═══ Step 6: 每段分别lip-sync ═══
+      setSbGenStatus("对口型中...");setVgStep(3);
+      const lipSyncUrls = [];
+      for (let i = 0; i < segCount; i++) {
+        if (!baseVideoUrls[i]) { lipSyncUrls.push(baseVideoUrls.find(u=>u)); continue; } // 用成功的替代
+        setSbGenStatus(`对口型 ${i+1}/${segCount}...`);
+        try {
+          const lsTaskId = await klingLipSync(baseVideoUrls[i], segAudioPubs[i]);
+          const lsUrl = await klingPollResult(lsTaskId, "/kling/v1/videos/lip-sync");
+          lipSyncUrls.push(lsUrl);
+          console.log(`[Avatar] Lip-sync ${i+1} OK`);
+        } catch(e) {
+          console.warn(`[Avatar] Lip-sync ${i+1} failed:`, e.message);
+          lipSyncUrls.push(baseVideoUrls[i]); // fallback用无lip-sync的视频
+        }
+        setVgPct(55 + Math.round(((i+1)/segCount) * 30));
+      }
+      setVgPct(85);
+
+      // ═══ Step 7: FFmpeg拼接所有片段 ═══
+      setSbGenStatus("合成最终视频...");setVgStep(3);
+      const clips = lipSyncUrls.filter(u=>u).map((url, i) => ({
+        videoUrl: url,
+        duration: Math.ceil(segDur),
+      }));
+      try {
+        const compR = await fetch("/compose-video", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({clips})});
+        const compType = compR.headers.get("Content-Type") || "";
+        if (compType.includes("video")) {
+          const blob = await compR.blob();
+          setFinalVideoUrl(URL.createObjectURL(blob));
+        } else {
+          // FFmpeg不可用，用第一个lip-sync视频
+          setFinalVideoUrl(lipSyncUrls.find(u=>u) || baseVideoUrls.find(u=>u));
+        }
+      } catch(e) {
+        console.warn("[Avatar] Compose failed:", e.message);
+        setFinalVideoUrl(lipSyncUrls.find(u=>u) || baseVideoUrls.find(u=>u));
+      }
+      setVgPct(100);
+      setVgStep(4);
+      setSbGenStatus("数字人视频生成完成！");
+      clearInterval(_tmr);
+      setSbElapsed(Math.round((Date.now()-_startT)/1000));
+      setCs("preview");
+    } catch(e) {
+      console.error("[Avatar] Video generation failed:", e);
+      setSbGenStatus("视频生成失败: " + e.message);
+    } finally {
+      setVidGenBusy(false);clearInterval(_tmr);
+    }
+  };
+
+  // WAV编码辅助函数
+  const audioBufferToWav = (buffer) => {
+    const numCh = buffer.numberOfChannels;
+    const sampleRate = buffer.sampleRate;
+    const format = 1; // PCM
+    const bitDepth = 16;
+    const bytesPerSample = bitDepth / 8;
+    const blockAlign = numCh * bytesPerSample;
+    const data = numCh === 1 ? buffer.getChannelData(0) : interleave(buffer);
+    const dataLen = data.length * bytesPerSample;
+    const headerLen = 44;
+    const buf = new ArrayBuffer(headerLen + dataLen);
+    const view = new DataView(buf);
+    const writeStr = (offset, str) => { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); };
+    writeStr(0, 'RIFF'); view.setUint32(4, 36 + dataLen, true); writeStr(8, 'WAVE');
+    writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, format, true);
+    view.setUint16(22, numCh, true); view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true); view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitDepth, true); writeStr(36, 'data'); view.setUint32(40, dataLen, true);
+    const offset = 44;
+    for (let i = 0; i < data.length; i++) {
+      const s = Math.max(-1, Math.min(1, data[i]));
+      view.setInt16(offset + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+    return new Blob([buf], { type: 'audio/wav' });
+  };
+  const interleave = (buffer) => {
+    const ch0 = buffer.getChannelData(0);
+    const ch1 = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : ch0;
+    const len = ch0.length + ch1.length;
+    const result = new Float32Array(len);
+    for (let i = 0, idx = 0; i < ch0.length; i++) { result[idx++] = ch0[i]; result[idx++] = ch1[i]; }
+    return result;
+  };
+
   const startCreate=async()=>{
+    // Redirect to simplified avatar flow when digital human mode is on
+    if(avatarOn && avatarSel && prodImages.length > 0) {
+      return startAvatarCreate();
+    }
     setModal(false);setPg("create");setCs("ai-generating");setAiScripts([]);activeCreatePg.current="create";
     const tmplInfo=libSelTmpl?[
       `套用博主模板「${libSelTmpl.name}」`,
@@ -1609,89 +2047,87 @@ JSON输出：
       // ═══ 第三步：并行展开每个大纲为完整分镜脚本 ═══
       setAiGenStep(`结构设计完成，正在并行创作${outlines.length}个脚本方案...`);
 
-      const sysScript=`你是抖音头部MCN的首席编导，操盘过100+条百万播放视频。你写的脚本有三个特点：1)台词像闺蜜/兄弟在聊天，绝不像念稿；2)每个画面都是精心设计的视觉钩子；3)情绪节奏像过山车，让人从头到尾不想划走。你写的不是"脚本"，是一部微型电影的导演手册。${tmplInfo?`\n你正在模仿「${creatorName}」的风格和说话习惯：\n${tmplInfo}`:""}${ipCtx}`;
+      const sysScript=`你是一个AI短视频脚本专家。你深刻理解AI视频制作的技术限制和能力边界。
 
-      const expandOne=(outline)=>`将以下脚本大纲展开为一条能在抖音拿到百万播放的完整分镜脚本。你不是在写说明书，你是在导一部30秒短片。
+你写的脚本将通过以下技术管线制作：
+1. AI生成静态图片（每镜头一张图，图片会被轻微动画化）
+2. AI语音合成（TTS）配旁白
+3. 自动拼接成视频
+
+⚠️ 所以你的脚本必须遵守以下铁律：
+- 每个镜头 = 一张静态图 + 一段旁白，仅此而已
+- 不要写BGM、音效、运镜、转场特效——这些不由脚本控制
+- 画面必须是"一张照片能表达的内容"，不要写动态动作
+- 人物画面用同一个人的不同姿势/角度，不要换人
+- 产品在每张图中必须长得一模一样${avatarOn&&avatarSel?`\n\n⚠️ 数字人主播模式已启用！
+视频中会有一个真人主播（数字人）出镜，拿着产品讲解展示。
+每个镜头必须标注 shot_type 字段：
+- "presenter"：主播出镜，拿着/展示产品对镜头说话。画面=主播+产品同框。
+- "product"：纯产品特写/场景氛围图，无人出镜。
+推荐交替出现：口播→产品→口播→产品。presenter占50-60%。
+presenter镜头的scene写主播的姿势和产品展示方式（如"主播手持产品对镜头微笑展示"），不要写BGM/运镜。`:""}${tmplInfo?`\n你正在模仿「${creatorName}」的风格：\n${tmplInfo}`:""}${ipCtx}`;
+
+      const expandOne=(outline)=>`为以下方案生成完整的抖音带货短视频脚本。
 
 产品：${prod}（${cat}）| 时长：${dur}
-${prodFullDesc?`\n【⚠️ 产品真实信息 — 铁律：只能用以下信息，禁止编造任何产品没有的功能/参数/效果】\n${prodFullDesc}\n`:""}
-【爆款分析背景——你的弹药库】
-${trendRaw.slice(0,2000)}
+${prodFullDesc?`\n【⚠️ 产品真实信息 — 只能用这些，禁止编造功能】\n${prodFullDesc}\n`:""}
+【爆款参考】
+${trendRaw.slice(0,1500)}
 
 【方案大纲】
-名称：${outline.name}｜类型：${outline.type}｜情绪走法：${outline.emotion}
-镜头数：${outline.shots}个｜卖点策略：${outline.strategy}
-前3秒钩子：${outline.hook||""}
+${outline.name}｜${outline.type}｜${outline.emotion}
+镜头数：${outline.shots}个｜策略：${outline.strategy}
+钩子：${outline.hook||""}
 步骤：${outline.structure.join(" → ")}
 
 ${riskRules}
 
-══════ 旁白台词创作军规（TTS配音，不是真人口播）══════
-⚠️ 这些台词将由AI语音合成朗读，配合产品大片画面播放，类似高级种草号/好物推荐号的风格。
+══════ 技术限制（必须遵守）══════
+你的脚本将由AI自动制作，不是人工拍摄。制作流程：
+① 每个镜头 → AI生成一张静态图片（gpt-image-1）
+② 图片 → 图生视频（自动加轻微动效，5-10秒）
+③ TTS语音合成读旁白
+④ FFmpeg自动拼接
 
-① 100%口语化！禁止一切书面腔（"焕然一新""何以至此""与众不同""品质卓越"全部枪毙）
-② 每句话≤15字，短句连发像机关枪。多用：啊、哦、哇、真的假的、你猜怎么着、我跟你说、对吧、懂了吗
-③ 台词之间要有"呼吸感"——不是匀速念稿，而是：快快快→停顿→重点慢放→再加速。用"..."标注停顿，用"【重】"标注需要加重语气的词
-④ 开场句是生死线！必须在0.5秒内制造认知冲突。参考这些已验证钩子：
-   "别买！除非你听我说完这句话" / "我花了3000块试了20款，只有这一个让我惊了" / "你敢信这玩意才XX块？" / "等等先别划走，我要说一个得罪同行的大实话" / "用了三个月，我终于敢出来说了" / "姐妹们被我骂了三天，因为我之前没推这个"
-⑤ 时长与字数严格匹配（4~5字/秒）：3秒≈12-15字、5秒≈20-25字、8秒≈32-40字、10秒≈40-50字
-⑥ 台词要有"钩子链"——每句话结尾勾着下一句，让观众不想划走：设置悬念("但接下来才是重点")、反转("结果你猜怎么着")、互动("你说气不气人")
-⑦ 逼单话术不要硬邦邦。不说"赶紧下单"，要说"反正我已经囤了三瓶了""链接我放这儿了，不买也先收藏，早晚用得上"
-⑧ 台词与画面的配合：旁白描述的内容要与当前画面呼应但不重复——画面是产品特写时，旁白说功效/体验；画面是氛围图时，旁白制造情绪/讲故事；画面是对比图时，旁白给数据/证据${tmplInfo?`\n⑨ 植入产品名+至少2个「${creatorName}」标志性用词和说话习惯`:""}
+所以：
+- scene字段 = 描述一张静态照片的内容（不是视频画面！）
+- 不要写：运镜、BGM、音效、转场特效、慢动作、快切——这些AI做不到
+- 可以写：构图、光线、景别、人物姿势、产品摆放位置、场景布置
+- 人物：同一个人贯穿全片，不同镜头换姿势/角度/景别即可
+- 产品：每张图中产品外观完全一致
 
-══════ 画面描述规则（scene字段）══════
-【第一优先级：爆款视觉逻辑】
-先按最火爆的短视频来设计画面——什么画面最抓眼球、最有冲击力、最能配合台词制造情绪高潮，就写什么。
-你要像一个百万粉短视频导演一样思考每个镜头的视觉叙事：
-- 前3秒的画面必须有视觉冲突（对比、反差、悬念、出乎意料的构图）
-- 产品出场要有"仪式感"——不是随便放那儿，是像电影主角登场一样有灯光、有铺垫
-- 高潮镜头要有视觉爆发力（质地特写、效果对比、超近距离微距）
-- 转场要跟情绪走——情绪突变用硬切/闪白，情绪延续用叠化/匹配剪辑
-- 每个镜头的色调要配合情绪：焦虑用冷灰、希望用暖金、高潮用饱和、信任用清透
+══════ 旁白台词规则（TTS朗读）══════
+① 100%口语化！禁止书面腔
+② 每句≤15字，短句为主
+③ 用"..."标停顿，用"【重】"标重音
+④ 开场必须有认知冲突钩子
+⑤ 字数匹配时长：3秒≈12字、5秒≈20字
+⑥ 每句结尾要勾下一句（悬念/反转/互动）
+⑦ 逼单软着来："反正我已经囤了""链接放这儿了"${tmplInfo?`\n⑧ 植入「${creatorName}」的用词习惯`:""}
 
-【第二优先级：适配AI生成画面】
-设计好爆款画面后，用以下方式转化为AI图片生成器能高质量实现的表达：
-- 需要真人出镜的画面 → 用场景氛围图、产品特写、局部暗示（肩颈/背影/发丝虚化）来替代，旁白负责传递"人"的部分
-- 需要动作的画面 → 用动作的结果/痕迹来暗示（撕开的包装、流淌的精华、敷过的面膜折痕、桌上的空瓶）
-- 需要文字/数字 → 用视觉隐喻替代（硬币堆→省钱、枯花vs鲜花→效果对比）
-- 需要表情 → 用环境情绪替代（凌乱桌面→疲惫、晨光卧室→舒适、整洁梳妆台→自信）
+══════ visual_anchor（视觉统一锚点）══════
+设计一个贯穿全片的视觉身份，所有字段英文：
+- character：主角固定外观（性别/年龄/发型/服装/配饰），极其具体。不需要人物写"none"
+- setting：固定主场景，所有镜头在同一个空间
+- product：产品固定外观 + 必须包含"no text no label no logo"
+- palette：统一色调和拍摄风格，如"warm daylight, iPhone feel, Douyin vlog aesthetic"
 
-每个scene写明：
-1.【景别+运镜】大特写/特写/中景/全景/俯拍 + 运镜方式
-2.【画面内容】按爆款逻辑写出最有冲击力的画面，然后用AI可实现的元素来表达
-3.【色调氛围】配合情绪的视觉基调
-4.【转场】配合情绪节奏的转场方式
-5.【声画配合】这个画面配合什么样的旁白节奏（快说/慢说/停顿/重音处画面怎么配合）
+══════ image_prompt（AI生图提示词）══════
+纯英文，40-60词。系统会自动拼接 visual_anchor + image_prompt。
+规则：
+- 不重复anchor中的人物/场景/色调
+- 只写：景别(close-up/medium/wide)、人物姿势、产品位置、光效
+- 必须以"no text, no labels in image."结尾
+- 风格像抖音博主用手机拍的生活照，不是广告大片
+- 避免正脸细节（AI弱项），用侧脸/背影/低头/手部特写
 
-══════ 视觉一致性锚点（visual_anchor字段）—— 最重要！══════
-这是保证整个视频视觉统一的关键。你必须先设计一个贯穿所有镜头的「视觉身份」，包含：
-- character：固定的主角外观描述（性别、年龄、发型、发色、服装、配饰），必须足够具体让AI每次画出同一个人。示例："25-year-old Asian woman with long straight black hair, wearing a cream oversized knit sweater, small gold stud earrings, natural minimal makeup"。如果脚本不需要人物则写"none"
-- setting：固定的主场景（所有镜头共享同一个空间，只是景别和角度变化），如 "modern minimalist bathroom vanity, white marble countertop, round LED mirror, small green succulent plant, warm morning light from right window"
-- product：产品的固定外观描述（材质、颜色、形状、大小、包装特征），要极其具体。示例："white frosted glass jar with silver metal lid, 50ml round shape, clean minimalist design with no label no text no logo"。⚠️ 必须写明 "no label no text no logo"
-- palette：统一的色调和摄影风格，如 "warm soft daylight from right, golden hour tones, slight film grain, iPhone 15 Pro Max front camera feel, shallow depth of field, Douyin lifestyle vlog aesthetic"
-⚠️ 所有字段必须是英文。⚠️ product字段必须包含"no text no label no logo"以避免AI生成乱码文字。
+══════ intent字段 ══════
+简写：情绪值 + 战术目的。如"好奇8→种草10 | 价格锚定：打破贵的认知"
 
-══════ AI生图提示词（image_prompt字段）══════
-纯英文，40-80词。这是每个镜头的【差异描述】，系统会自动把 visual_anchor + image_prompt 拼在一起。
-核心规则：
-- 绝对不要在image_prompt中出现任何文字/标签/logo相关的描述！加上"no text, no words, no labels"
-- 不要重复visual_anchor中已有的人物外观、服装、场景环境、整体色调
-- 只写：这个镜头特有的构图、景别（extreme close-up/close-up/medium/wide）、动作/姿势、产品摆放方式、特殊光效
-- 风格要像抖音爆款视频截图，不是产品广告大片，要有生活感和真实感
-- 必须包含：镜头参数（lens mm, aperture）、构图法则
-- 避免生成正脸和手指细节（AI弱项），用虚化/局部/背影/剪影代替
-- 连续镜头间要有景别和构图的节奏变化（特写→中景→俯拍→特写），但色调和场景保持统一
+badges：2-3个标签，c用conv/exp/auth
 
-══════ 情绪&意图设计（intent字段）══════
-不要写"情绪：低→中"这种废话。要写：
-- 精确的情绪峰谷值（0-10分）：如"好奇8→震惊10 | 认知炸弹：打破用户对价格的固有认知"
-- 这个镜头在整个视频中的战术目的：制造好奇心/建立信任/触发焦虑/给出解决方案/social proof/价格锚定/紧迫感/行动号召
-- 完播率策略：这个镜头怎么让人"不划走"
-
-badges说明：每个方案给2-3个描述性标签，t是标签文字（如"高转化""强信任""情感共鸣""实验对比""痛点驱动""价格锚定""种草力强""完播率杀手""评论区炸弹"等），c是类型（conv=转化类/exp=曝光类/auth=权威类）。
-
-JSON输出（严格按此格式，visual_anchor是全局共享的，table数组每个元素都必须包含所有字段）：
-{"name":"${outline.name}","dur":"${dur}","shots":${outline.shots},"sell":3,"desc":"一句话概括创意亮点（30字内，像爆款视频简介，要有冲击力）","badges":[{"t":"标签","c":"类型"}],"visual_anchor":{"character":"young Asian woman with shoulder-length black hair in loose bun, wearing oversized cream linen shirt, small gold hoop earrings","setting":"modern minimalist kitchen, light oak cabinets, white marble countertop with grey veins, wooden cutting board, green plant in corner, large window on left","product":"stainless steel mandoline slicer with black ergonomic handle, 30cm tall","palette":"warm natural daylight from left window, soft golden tones, slight film grain, Canon 50mm f/1.4, shallow depth of field, lifestyle commercial photography"},"logic":${JSON.stringify(outline.structure)},"table":[{"shot":1,"dur":"3秒","scene":"【类型：产品英雄镜头】【大特写·缓慢推进】产品放在大理石台面上，侧逆光穿过产品折射光斑，背景失焦绿植【暖橘调】【转场：从黑屏淡入】","copy":"旁白台词（用...标停顿，【重】标重音）","image_prompt":"extreme close-up with slow push-in, product placed at 45-degree angle on countertop, single rim light from upper left creating amber lens flare, blurred green leaves in background, macro 100mm f/2.8, rule of thirds composition, cinematic still life","risk":false,"intent":"好奇9→期待10 | 战术：视觉冲击建立品质感，黄金3秒留住观众 | 完播策略：高级画面+悬念旁白制造信息缺口"}]}`;
+JSON格式（严格遵守，不要多余文字）：
+{"name":"${outline.name}","dur":"${dur}","shots":${outline.shots},"sell":3,"desc":"创意亮点30字","badges":[{"t":"标签","c":"conv"}],"visual_anchor":{"character":"English","setting":"English","product":"English, no text no label no logo","palette":"English"},"logic":${JSON.stringify(outline.structure)},"table":[{"shot":1,"dur":"5秒"${avatarOn?',"shot_type":"presenter"':""},"scene":"一张静态照片的描述","copy":"旁白台词","image_prompt":"English 40-60 words, no text, no labels in image.","risk":false,"intent":"情绪+目的"}]}`;
 
       // 并行展开，失败自动重试1次
       const expandWithRetry=async(o)=>{
@@ -4350,7 +4786,7 @@ div:hover>.sch-inline-del{opacity:1 !important}
                   <button className="abi"><I.Copy/> 复制全文</button>
                   <button className="abi"><I.Download/> 导出PDF</button>
                   <button className="abi"><I.Refresh/> 重新生成</button>
-                  <button className="abi pr" onClick={()=>setCs("shots")}>采纳此方案</button>
+                  <button className="abi pr" onClick={()=>{if(avatarOn&&adopted?._avatarData){generateAvatarVideo();}else{setCs("shots");}}}>采纳此方案</button>
                 </div>
               </div></div>
             </>;})()}
@@ -4413,8 +4849,8 @@ div:hover>.sch-inline-del{opacity:1 !important}
                     </div>
                     <div className="sb-card-body">
                       <div className="sb-card-meta">
-                        <span className={`sb-card-tag ${c.tag||(i===0?"hook":"medium")}`}>{SHOT_TAGS[c.tag]||c.tag||"中景"}</span>
-                        <span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:"#EEF2FF",color:"#4338CA"}}>{CAMERA_TAGS[c.camera]||"固定"}</span>
+                        {c.shotType==="presenter"?<span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:"#FDF2F8",color:"#BE185D",fontWeight:600}}>🎙 数字人口播</span>:<span className={`sb-card-tag ${c.tag||(i===0?"hook":"medium")}`}>{SHOT_TAGS[c.tag]||c.tag||"中景"}</span>}
+                        <span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:"#EEF2FF",color:"#4338CA"}}>{c.shotType==="presenter"?"Kling+LipSync":CAMERA_TAGS[c.camera]||"固定"}</span>
                         <span className="sb-card-dur">{c.dur}</span>
                         <span className="sb-card-num">#{i+1}</span>
                       </div>
@@ -4620,6 +5056,18 @@ div:hover>.sch-inline-del{opacity:1 !important}
               </div>
               <div style={{fontSize:11,color:"var(--t3)",marginTop:4}}>上传1-4张产品实物照片，AI会在所有镜头中使用同一产品形象</div>
             </div>
+            <div className="fg2"><div className="tr"><span className="trl">数字人主播</span><button className="trb" onClick={()=>setAvatarOn(!avatarOn)}>{avatarOn?<I.TglOn/>:<I.TglOff/>}</button></div><div className="dh">启用数字人出镜带货，像真人拿着产品展示讲解</div></div>
+{avatarOn&&<div className="fg2"><label className="fg2-l">选择主播形象</label>
+  <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:6}}>
+    {AVATAR_PRESETS.map(a=><div key={a.id} onClick={()=>setAvatarSel(a)} style={{cursor:"pointer",minWidth:80,textAlign:"center",padding:6,borderRadius:10,border:avatarSel?.id===a.id?"2px solid var(--p)":"2px solid var(--bl)",background:avatarSel?.id===a.id?"var(--pbg)":"transparent",transition:"all .2s"}}>
+      <div style={{width:64,height:64,borderRadius:8,overflow:"hidden",margin:"0 auto 4px",background:"var(--s3)"}}>
+        <img src={a.imgUrl} alt={a.nm} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none"}}/>
+      </div>
+      <div style={{fontSize:11,fontWeight:600}}>{a.nm}</div>
+      <div style={{fontSize:9,color:"var(--t3)"}}>{a.tags}</div>
+    </div>)}
+  </div>
+</div>}
             <div className="fg2"><label className="fg2-l">产品描述/卖点 <span style={{color:"var(--t3)",fontWeight:400,fontSize:11}}>（强烈推荐，避免AI瞎编功能）</span></label>
               <textarea className="fin" value={prodDesc} onChange={e=>setProdDesc(e.target.value)} placeholder={"例如：粉色陶瓷马克杯，350ml容量，简约北欧风设计，适合办公室和家用。\n\n写清楚：产品是什么、材质/外观、核心卖点、使用场景等，AI会严格按你的描述来写脚本。"} rows={3} style={{resize:"vertical",lineHeight:1.6}}/>
             </div>

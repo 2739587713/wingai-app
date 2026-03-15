@@ -109,9 +109,9 @@ function videoComposePlugin() {
   // Check if FFmpeg is available on this system
   function checkFFmpeg() {
     return new Promise((resolve) => {
-      const p = spawn('ffmpeg', ['-version'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
-      p.on('close', code => resolve(code === 0))
-      p.on('error', () => resolve(false))
+      const p = spawn(FFMPEG_BIN, ['-version'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      p.on('close', code => { console.log(`[compose-video] ffmpeg check: ${FFMPEG_BIN}, code=${code}`); resolve(code === 0) })
+      p.on('error', () => { console.log(`[compose-video] ffmpeg not found at: ${FFMPEG_BIN}`); resolve(false) })
     })
   }
 
@@ -282,11 +282,25 @@ function videoComposePlugin() {
     return outputFile
   }
 
+  // Resolve ffmpeg binary path
+  const FFMPEG_PATHS = [
+    'ffmpeg',
+    (process.env.LOCALAPPDATA || '').replace(/\\/g, '/') + '/Microsoft/WinGet/Links/ffmpeg.exe',
+    (process.env.LOCALAPPDATA || '').replace(/\\/g, '/') + '/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.0.1-full_build/bin/ffmpeg.exe',
+    'C:/Users/Lenovo/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.0.1-full_build/bin/ffmpeg.exe',
+  ]
+  function getFFmpegBin() {
+    for (const p of FFMPEG_PATHS) { try { require('child_process').execSync(p + ' -version', { stdio: 'ignore' }); console.log('[compose-video] Found ffmpeg at:', p); return p } catch {} }
+    console.log('[compose-video] WARNING: ffmpeg not found in any path!')
+    return 'ffmpeg'
+  }
+  const FFMPEG_BIN = getFFmpegBin()
+
   // Run ffmpeg with args, return promise
   function runFFmpeg(args) {
     return new Promise((resolve, reject) => {
       console.log(`[compose-video] ffmpeg ${args.slice(0, 6).join(' ')}...`)
-      const p = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      const p = spawn(FFMPEG_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
       let stderr = ''
       p.stderr.on('data', d => stderr += d)
       p.on('close', code => {
