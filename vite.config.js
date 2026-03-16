@@ -372,6 +372,12 @@ function videoComposePlugin() {
   }
 }
 
+// Ensure Vite proxy to localhost bypasses system HTTP proxy (Clash etc.)
+delete process.env.http_proxy
+delete process.env.HTTP_PROXY
+delete process.env.https_proxy
+delete process.env.HTTPS_PROXY
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), urlExpandPlugin(), edgeTTSPlugin(), videoComposePlugin()],
@@ -405,6 +411,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        ws: true,
       },
       '/videos': {
         target: 'http://localhost:8000',

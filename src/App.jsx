@@ -110,8 +110,8 @@ const NAV=[
   {group:"",items:[{k:"dash",icon:<I.Grid/>,label:"工作台"}]},
   {group:"AI 创作",items:[
     {k:"aicreate",icon:<I.Sparkle/>,label:"AI创作",accent:true,action:"modal"},
-    {k:"comic-drama",icon:<I.Camera/>,label:"漫剧生成"},
-    {k:"storyboard-wb",icon:<I.Layers/>,label:"分镜工作台"},
+    // {k:"comic-drama",icon:<I.Camera/>,label:"漫剧生成"},
+    // {k:"storyboard-wb",icon:<I.Layers/>,label:"分镜工作台"},
     {k:"avatar",icon:<I.People/>,label:"数字人生成"},
     {k:"imgtext",icon:<I.Image/>,label:"图文AI制作"},
   ]},
@@ -418,6 +418,25 @@ export default function App(){
   const [ipEditing,setIpEditing]=useState(null); // index being re-answered
   const [ipProfile,setIpProfile]=useState({field:"",biz:"",clients:"",duty:"",scale:"",stance:"",think:"",style:""});
   const [ipEditField,setIpEditField]=useState(null);
+  const [ipMode,setIpMode]=useState("text"); // "text" or "voice"
+  // Voice interview states
+  const [voiceState,setVoiceState]=useState("idle"); // idle|connecting|ai_speaking|user_speaking|thinking
+  const [voicePhase,setVoicePhase]=useState("background");
+  const [voiceTranscript,setVoiceTranscript]=useState([]);
+  const [voiceMuted,setVoiceMuted]=useState(false);
+  const [voiceDuration,setVoiceDuration]=useState("00:00");
+  const [voiceShowLog,setVoiceShowLog]=useState(false);
+  const [wsConnected,setWsConnected]=useState(false);
+  const wsRef=useRef(null);
+  const voiceMutedRef=useRef(false);
+  const voiceStateRef=useRef("idle");
+  const audioCtxPlayRef=useRef(null);
+  const nextPlayTimeRef=useRef(0);
+  const mediaStreamRef=useRef(null);
+  const audioCtxRecRef=useRef(null);
+  const recNodeRef=useRef(null);
+  const durationTimerRef=useRef(null);
+  const voiceStartTimeRef=useRef(null);
   const ivRef=useRef(null);
   useEffect(()=>{if(ivRef.current)setTimeout(()=>{ivRef.current.scrollTop=ivRef.current.scrollHeight;},50);},[ipAnswers,ipPhase,ipQIdx,ipEditing]);
   const ipPhases=[
@@ -455,6 +474,123 @@ export default function App(){
       }
     }else{setIpQIdx(nextQ);}
   };
+  // Voice interview: sync refs with state
+  useEffect(()=>{voiceMutedRef.current=voiceMuted;},[voiceMuted]);
+  useEffect(()=>{voiceStateRef.current=voiceState;},[voiceState]);
+
+  const playPcm16Base64=(base64Chunk)=>{
+    if(!audioCtxPlayRef.current){audioCtxPlayRef.current=new AudioContext({sampleRate:24000});nextPlayTimeRef.current=0;}
+    try{
+      const binary=atob(base64Chunk);const bytes=new Uint8Array(binary.length);
+      for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+      const pcm16=new Int16Array(bytes.buffer);const float32=new Float32Array(pcm16.length);
+      for(let i=0;i<pcm16.length;i++)float32[i]=pcm16[i]/32768.0;
+      const ctx=audioCtxPlayRef.current;const buffer=ctx.createBuffer(1,float32.length,24000);
+      buffer.getChannelData(0).set(float32);
+      const now=ctx.currentTime;const startTime=Math.max(now,nextPlayTimeRef.current);
+      nextPlayTimeRef.current=startTime+buffer.duration;
+      const src=ctx.createBufferSource();src.buffer=buffer;src.connect(ctx.destination);src.start(startTime);
+    }catch(e){console.error("Audio playback error:",e);}
+  };
+
+  const voiceCleanup=()=>{
+    if(recNodeRef.current){try{recNodeRef.current.disconnect();}catch(e){}recNodeRef.current=null;}
+    mediaStreamRef.current?.getTracks().forEach(t=>t.stop());mediaStreamRef.current=null;
+    if(audioCtxRecRef.current){try{audioCtxRecRef.current.close();}catch(e){}audioCtxRecRef.current=null;}
+    if(wsRef.current){try{wsRef.current.close();}catch(e){}wsRef.current=null;}
+    setWsConnected(false);
+    if(durationTimerRef.current){clearInterval(durationTimerRef.current);durationTimerRef.current=null;}
+    if(audioCtxPlayRef.current){try{audioCtxPlayRef.current.close();}catch(e){}audioCtxPlayRef.current=null;}
+    setVoiceState("idle");
+  };
+
+  const startVoiceMic=async(wsSend)=>{
+    const SR=24000,BS=2400;
+    const stream=await navigator.mediaDevices.getUserMedia({audio:{sampleRate:SR,channelCount:1,echoCancellation:true,noiseSuppression:true}});
+    mediaStreamRef.current=stream;
+    const ctx=new AudioContext({sampleRate:SR});audioCtxRecRef.current=ctx;
+    const source=ctx.createMediaStreamSource(stream);
+    const sendChunk=(base64)=>{if(!voiceMutedRef.current&&voiceStateRef.current!=='ai_speaking')wsSend({type:'audio',data:base64});};
+    let ok=false;
+    try{
+      const code=`class P extends AudioWorkletProcessor{constructor(){super();this._b=new Float32Array(${BS});this._o=0;}process(inputs){const ch=inputs[0]?.[0];if(!ch)return true;for(let i=0;i<ch.length;i++){this._b[this._o++]=ch[i];if(this._o>=${BS}){const p=new Int16Array(${BS});for(let j=0;j<${BS};j++){const s=Math.max(-1,Math.min(1,this._b[j]));p[j]=s<0?s*0x8000:s*0x7FFF;}this.port.postMessage(p.buffer,[p.buffer]);this._b=new Float32Array(${BS});this._o=0;}}return true;}}registerProcessor('ac',P);`;
+      const blob=new Blob([code],{type:'application/javascript'});const url=URL.createObjectURL(blob);
+      await ctx.audioWorklet.addModule(url);URL.revokeObjectURL(url);
+      const wn=new AudioWorkletNode(ctx,'ac');
+      wn.port.onmessage=(e)=>{const u8=new Uint8Array(e.data);let b='';for(let i=0;i<u8.length;i++)b+=String.fromCharCode(u8[i]);sendChunk(btoa(b));};
+      source.connect(wn);const g=ctx.createGain();g.gain.value=0;wn.connect(g);g.connect(ctx.destination);
+      recNodeRef.current=wn;ok=true;
+    }catch(e){console.warn("AudioWorklet unavailable, fallback to ScriptProcessor");}
+    if(!ok){
+      const sn=ctx.createScriptProcessor(4096,1,1);
+      sn.onaudioprocess=(e)=>{
+        const f=e.inputBuffer.getChannelData(0);const p=new Int16Array(f.length);
+        for(let i=0;i<f.length;i++){const s=Math.max(-1,Math.min(1,f[i]));p[i]=s<0?s*0x8000:s*0x7FFF;}
+        const u8=new Uint8Array(p.buffer);let b='';for(let i=0;i<u8.byteLength;i++)b+=String.fromCharCode(u8[i]);sendChunk(btoa(b));
+      };
+      source.connect(sn);const g=ctx.createGain();g.gain.value=0;sn.connect(g);g.connect(ctx.destination);
+      recNodeRef.current=sn;
+    }
+  };
+
+  const startVoiceInterview=()=>{
+    if(!ipName||!ipIndustry){alert("请先填写姓名和行业信息");setIpStep(1);return;}
+    setVoiceState("connecting");setVoiceTranscript([]);setVoiceMuted(false);setVoicePhase("background");setVoiceDuration("00:00");
+    const protocol=location.protocol==='https:'?'wss:':'ws:';
+    const ws=new WebSocket(`${protocol}//${location.host}/api/ip-studio/interview/live`);
+    wsRef.current=ws;
+    const wsSend=(data)=>{if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(data));};
+    ws.onopen=()=>{wsSend({type:'init',name:ipName,industry:ipIndustry,role:ipRole||'创始人'});};
+    ws.onmessage=(event)=>{
+      try{const data=JSON.parse(event.data);
+        switch(data.type){
+          case 'connected':
+            setVoiceState("idle");setWsConnected(true);
+            voiceStartTimeRef.current=Date.now();
+            durationTimerRef.current=setInterval(()=>{
+              const sec=Math.floor((Date.now()-(voiceStartTimeRef.current||Date.now()))/1000);
+              setVoiceDuration(`${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`);
+            },1000);
+            startVoiceMic(wsSend).catch(()=>alert("麦克风权限获取失败"));
+            break;
+          case 'ai_speaking_start':setVoiceState("ai_speaking");break;
+          case 'ai_audio':playPcm16Base64(data.data);break;
+          case 'ai_speaking_done':setVoiceState(p=>p==="ai_speaking"?"idle":p);break;
+          case 'user_speaking_start':setVoiceState("user_speaking");break;
+          case 'user_speaking_done':setVoiceState("thinking");break;
+          case 'transcript':if(data.text?.trim())setVoiceTranscript(p=>[...p,{role:data.role,text:data.text}]);break;
+          case 'phase_change':
+            setVoicePhase(data.phase);
+            setVoiceTranscript(p=>[...p,{role:'phase',text:data.message||`进入${data.phase}阶段`}]);break;
+          case 'interview_done':
+            voiceCleanup();
+            if(data.chat_history){
+              fetch('/api/ip-studio/interview/finalize',{method:'POST',headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({name:ipName,industry:ipIndustry,role:ipRole||'创始人',chat_history:data.chat_history})
+              }).then(r=>r.json()).then(res=>{
+                if(res.success&&res.profile){const p=res.profile;
+                  setIpProfile({field:p.industry_segment||p.industry||'',biz:p.core_business||'',clients:p.target_audience||'',
+                    duty:p.role_description||p.role||'',scale:p.company_scale||'',stance:p.ip_positioning||'',
+                    think:(p.content_pillars||[]).join('、')||'',style:p.voice_fingerprint?.口头禅||p.voice_fingerprint?.表达特征||''});}
+                setIpStep(3);
+              }).catch(()=>setIpStep(3));
+            }else{setIpStep(3);}
+            break;
+          case 'error':alert(data.message||"语音访谈出错");setVoiceState("idle");break;
+        }
+      }catch(e){}
+    };
+    ws.onerror=()=>{alert("语音连接出错");setVoiceState("idle");};
+    ws.onclose=()=>{setWsConnected(false);};
+  };
+
+  const voiceToggleMute=()=>{setVoiceMuted(p=>!p);};
+  const voiceEndCall=()=>{
+    if(!confirm("确定结束通话吗？访谈记录将被保存。"))return;
+    if(wsRef.current?.readyState===WebSocket.OPEN)wsRef.current.send(JSON.stringify({type:'end_call'}));
+    setTimeout(()=>{if(wsRef.current){voiceCleanup();setIpStep(3);}},3000);
+  };
+
   const [ci,setCi]=useState("");
   const [msgs,setMsgs]=useState([{r:"bot",c:"你好！我是你的短视频创作顾问\n\n告诉我你想创作什么内容，或者你的产品/服务是什么——",acts:["找抖音热点","分析爆款案例","获取创作灵感"]}]);
   const chatRef=useRef(null);
@@ -4600,7 +4736,7 @@ div:hover>.sch-inline-del{opacity:1 !important}
 
         {pg==="ip"&&<div className="sc"><div className="ipc2">
           {!ipFlow?<>
-            <div className="iph"><div className="iph-a">IP</div><div className="iph-n">我的创作者人设</div><div className="iph-d">基于AI访谈生成的个性化IP画像，自动融入脚本创作</div><div className="iph-ts">{["专业测评","亲和力强","干货分享","真实体验","数据说话"].map((t,i)=><span key={i} className="iph-t">{t}</span>)}</div><div className="iph-ac"><button className="bt bt-p" onClick={()=>{setIpFlow(true);setIpStep(0);setIpPhase(0);setIpQIdx(0);setIpAnswers([]);setIpCurAns("");setIpEditing(null);}}><I.Mic/> 重新访谈</button><button className="bt bt-g"><I.Edit/> 手动编辑</button></div></div>
+            <div className="iph"><div className="iph-a">IP</div><div className="iph-n">我的创作者人设</div><div className="iph-d">基于AI访谈生成的个性化IP画像，自动融入脚本创作</div><div className="iph-ts">{["专业测评","亲和力强","干货分享","真实体验","数据说话"].map((t,i)=><span key={i} className="iph-t">{t}</span>)}</div><div className="iph-ac"><button className="bt bt-p" onClick={()=>{voiceCleanup();setIpFlow(true);setIpStep(0);setIpPhase(0);setIpQIdx(0);setIpAnswers([]);setIpCurAns("");setIpEditing(null);setIpMode("text");}}><I.Mic/> 重新访谈</button><button className="bt bt-g"><I.Edit/> 手动编辑</button></div></div>
             <div className="ips"><div className="ips-t"><I.User/> 人设基本信息</div><div className="ipg">{[{l:"表达风格",v:"轻松幽默、接地气"},{l:"专业领域",v:"美妆护肤、个人护理"},{l:"目标受众",v:"18-35岁女性用户"},{l:"内容调性",v:"真实测评+干货分享"},{l:"常用平台",v:"抖音、小红书"},{l:"视频风格",v:"对镜口播+实测对比"}].map((x,i)=><div key={i} className="ipi"><div className="ipi-l">{x.l}</div><div className="ipi-v">{x.v}</div></div>)}</div></div>
             <div className="ips"><div className="ips-t"><I.Sparkle/> 创作偏好</div><div style={{fontSize:12,color:"var(--t2)",lineHeight:1.8}}><p style={{marginBottom:8}}>开头习惯用反问句或痛点切入，善于用数据对比突出产品优势。文案风格偏口语化。</p><p>结尾通常以限时优惠或个人推荐作为转化钩子，偏好30-60秒的短视频节奏。</p></div></div>
             <div className="ips"><div className="ips-t"><I.BarChart/> IP应用效果</div><div className="ipg">{[{l:"IP融合脚本数",v:"18个"},{l:"平均匹配度",v:"92%"},{l:"完播率提升",v:"+15%"},{l:"转化率提升",v:"+8%"}].map((x,i)=><div key={i} className="ipi"><div className="ipi-l">{x.l}</div><div className="ipi-v" style={{color:"var(--p)",fontWeight:700}}>{x.v}</div></div>)}</div></div>
@@ -4611,13 +4747,13 @@ div:hover>.sch-inline-del{opacity:1 !important}
               <div className="ip-fw-t">开始IP人设访谈</div>
               <div className="ip-fw-d">通过AI深度访谈，生成专属于你的创作者人设画像<br/>你的回答将决定AI为你生成的每一条脚本的风格</div>
               <div className="ip-mode-wrap">
-                <div className="ip-mode-main" onClick={()=>setIpStep(1)}>
+                <div className="ip-mode-main" onClick={()=>{setIpMode("text");setIpStep(1);}}>
                   <div className="im-ic"><I.Edit/></div>
                   <div className="im-t">开始文字访谈</div>
                   <div className="im-d">通过文字问答，逐步梳理你的IP定位和表达风格</div>
                 </div>
-                <div className="ip-mode-alt" onClick={()=>setIpStep(1)}>
-                  <div><div className="im-t">🎙️ 语音访谈</div><div className="im-d">适合不方便打字的场景</div></div>
+                <div className="ip-mode-alt" onClick={()=>{setIpMode("voice");setIpStep(1);}}>
+                  <div><div className="im-t">🎙️ 语音访谈</div><div className="im-d">像打电话一样，直接说就行</div></div>
                 </div>
               </div>
             </div>}
@@ -4629,11 +4765,106 @@ div:hover>.sch-inline-del{opacity:1 !important}
               <div className="ip-fg"><div className="ip-fg-l">您的名字</div><input className="fin" value={ipName} onChange={e=>setIpName(e.target.value)} placeholder="请输入您的姓名"/></div>
               <div className="ip-fg"><div className="ip-fg-l">所在行业</div><input className="fin" value={ipIndustry} onChange={e=>setIpIndustry(e.target.value)} placeholder="请输入您所在的行业"/></div>
               <div className="ip-fg"><div className="ip-fg-l">您的角色</div><div className="ip-roles">{["创始人/CEO","讲师/培训师","顾问/咨询师","自由职业者","其他"].map(r=><button key={r} className={`ip-rl ${ipRole===r?"on":""}`} onClick={()=>setIpRole(r)}>{r}</button>)}</div></div>
-              <div className="ip-acts"><button className="bt bt-g" onClick={()=>setIpStep(0)}>上一步</button><button className="bt bt-p" onClick={()=>setIpStep(2)}>进入访谈 <I.ArrowR/></button></div>
+              <div className="ip-acts"><button className="bt bt-g" onClick={()=>setIpStep(0)}>上一步</button><button className="bt bt-p" onClick={()=>{setIpStep(2);if(ipMode==="voice")setTimeout(startVoiceInterview,100);}}>{ipMode==="voice"?"开始语音访谈":"进入访谈"} <I.ArrowR/></button></div>
             </div>}
 
-            {/* Step 2: AI Interview */}
-            {ipStep===2&&<div>
+            {/* Step 2: Voice Interview */}
+            {ipStep===2&&ipMode==="voice"&&<div>
+              <style>{`@keyframes voicePulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.15);opacity:0.4}}`}</style>
+              <div className="iv-hd">
+                <div className="iv-hd-l">
+                  <div className="iv-hd-av" style={{background:'linear-gradient(135deg,#8b5cf6,#ec4899)'}}><I.Mic/></div>
+                  <div><div className="iv-hd-nm">AI记者 · 语音访谈中</div><div className="iv-hd-sub">像打电话一样，直接说就行</div></div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  {voiceState==="connecting"&&<span style={{fontSize:12,color:"var(--t3)",background:"var(--s)",padding:"2px 8px",borderRadius:8}}>连接中...</span>}
+                  {wsConnected&&<span style={{fontSize:12,color:"#10b981",background:"rgba(16,185,129,0.1)",padding:"2px 8px",borderRadius:8}}>已连接</span>}
+                  <button style={{width:32,height:32,borderRadius:8,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t3)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}} onClick={()=>{voiceCleanup();setIpFlow(false);setIpStep(0);}} title="退出"><I.X/></button>
+                </div>
+              </div>
+
+              <div className="iv-phases">
+                {[{key:'background',name:'背景采集',sub:'3-5轮'},{key:'hot_topics',name:'热点观点',sub:'3-5轮'},{key:'cognitive',name:'思维挖掘',sub:'4-6轮'},{key:'voice',name:'表达采样',sub:'3-4轮'}].map((p)=>{
+                  const po=['background','hot_topics','cognitive','voice'];const ci2=po.indexOf(voicePhase);const pi=po.indexOf(p.key);
+                  return <div key={p.key} className={`iv-ph ${pi===ci2?"on":""} ${pi<ci2?"dn":""}`}>
+                    <div className="iv-ph-num">{pi<ci2?<I.Check/>:pi+1}</div>
+                    <div className="iv-ph-nm">{p.name}</div><div className="iv-ph-sub">{p.sub}</div>
+                  </div>;
+                })}
+              </div>
+
+              {voiceState==="idle"&&!wsConnected?
+                <div style={{textAlign:"center",padding:"60px 0"}}>
+                  <button className="bt bt-p" style={{fontSize:16,padding:"14px 40px"}} onClick={startVoiceInterview}><I.Mic/> 开始语音访谈</button>
+                </div>
+              :<div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:250}}>
+                <div style={{position:"relative",width:160,height:160,marginBottom:24}}>
+                  <div style={{width:160,height:160,borderRadius:"50%",
+                    background:voiceState==="ai_speaking"?"linear-gradient(135deg,#8b5cf6,#ec4899)":voiceState==="user_speaking"?"linear-gradient(135deg,#10b981,#06b6d4)":"linear-gradient(135deg,#d1d5db,#9ca3af)",
+                    display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.3s ease",
+                    boxShadow:(voiceState==="ai_speaking"||voiceState==="user_speaking")?"0 0 40px rgba(139,92,246,0.3)":"none"}}>
+                    <div style={{color:"white",width:48,height:48}}>
+                      {voiceState==="ai_speaking"?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                      :voiceState==="user_speaking"?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+                      :(voiceState==="thinking"||voiceState==="connecting")?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{animation:"spin 1s linear infinite"}}><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                      :<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>}
+                    </div>
+                  </div>
+                  {(voiceState==="ai_speaking"||voiceState==="user_speaking")&&
+                    <div style={{position:"absolute",top:-10,left:-10,width:180,height:180,borderRadius:"50%",border:"2px solid",
+                      borderColor:voiceState==="ai_speaking"?"rgba(139,92,246,0.4)":"rgba(16,185,129,0.4)",animation:"voicePulse 1.5s ease-in-out infinite"}}/>}
+                </div>
+                <div style={{fontSize:16,fontWeight:"bold",marginBottom:8}}>
+                  {voiceState==="connecting"&&<span style={{color:"var(--t3)"}}>正在连接语音服务...</span>}
+                  {voiceState==="ai_speaking"&&<span style={{color:"#8b5cf6"}}>AI正在说话...</span>}
+                  {voiceState==="user_speaking"&&<span style={{color:"#10b981"}}>正在听你说...</span>}
+                  {voiceState==="thinking"&&<span style={{color:"#f59e0b"}}>AI思考中...</span>}
+                  {voiceState==="idle"&&wsConnected&&<span style={{color:"#6b7280"}}>等待你说话...</span>}
+                </div>
+                {wsConnected&&<div style={{display:"flex",gap:16,fontSize:13,color:"var(--t3)",marginBottom:8}}>
+                  <span>{voiceDuration}</span>
+                  <span>第 {voiceTranscript.filter(t=>t.role==="user").length} 轮</span>
+                </div>}
+                {voiceTranscript.length>0&&<div style={{fontSize:13,color:"var(--t2)",maxWidth:400,textAlign:"center",lineHeight:1.5,minHeight:40}}>
+                  {(()=>{const f=voiceTranscript.filter(t=>t.role!=='phase');const l=f[f.length-1];if(!l)return '';return l.text.length>80?l.text.slice(0,80)+'...':l.text;})()}
+                </div>}
+              </div>}
+
+              {voiceTranscript.length>0&&<div style={{marginTop:16}}>
+                <div style={{cursor:"pointer",fontSize:13,color:"var(--t3)",textAlign:"center",padding:8,userSelect:"none"}} onClick={()=>setVoiceShowLog(!voiceShowLog)}>
+                  {voiceShowLog?"收起对话记录":"查看对话记录"} <I.ChevronD/>
+                </div>
+                {voiceShowLog&&<div style={{maxHeight:200,overflowY:"auto",padding:8,background:"var(--s)",borderRadius:8}}>
+                  {voiceTranscript.map((t,i)=>(
+                    <div key={i} style={{marginBottom:10}}>
+                      {t.role==='phase'?
+                        <div style={{textAlign:"center",padding:8}}><span style={{display:"inline-block",padding:"6px 16px",background:"linear-gradient(135deg,#ede9fe,#ddd6fe)",borderRadius:16,fontSize:12,color:"#6d28d9",fontWeight:"bold"}}>{t.text}</span></div>
+                      :t.role==='ai'?
+                        <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+                          <div style={{width:24,height:24,borderRadius:"50%",background:"linear-gradient(135deg,#8b5cf6,#ec4899)",display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontSize:10,flexShrink:0}}>AI</div>
+                          <div style={{fontSize:13,color:"var(--t2)",lineHeight:1.5}}>{t.text}</div>
+                        </div>
+                      :<div style={{display:"flex",gap:8,alignItems:"flex-start",justifyContent:"flex-end"}}>
+                          <div style={{fontSize:13,color:"var(--t1)",lineHeight:1.5,textAlign:"right"}}>{t.text}</div>
+                          <div style={{width:24,height:24,borderRadius:"50%",background:"#6b7280",display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontSize:10,flexShrink:0}}>我</div>
+                        </div>}
+                    </div>
+                  ))}
+                </div>}
+              </div>}
+
+              <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:20,paddingTop:16,borderTop:"1px solid var(--bl)"}}>
+                <button style={{width:44,height:44,borderRadius:"50%",border:voiceMuted?"2px solid #ef4444":"1px solid var(--bl)",background:voiceMuted?"rgba(239,68,68,0.1)":"var(--s)",color:voiceMuted?"#ef4444":"var(--t2)",display:"flex",alignItems:"center",justifyContent:"center",cursor:wsConnected?"pointer":"not-allowed",opacity:wsConnected?1:0.5}} onClick={voiceToggleMute} disabled={!wsConnected}>
+                  {voiceMuted?<I.X/>:<I.Mic/>}
+                </button>
+                <button style={{padding:"12px 32px",fontSize:15,background:"#ef4444",color:"white",border:"none",borderRadius:12,cursor:"pointer",display:"flex",alignItems:"center",gap:8,fontFamily:"inherit",fontWeight:600}} onClick={voiceEndCall}>
+                  <I.X/> 结束通话
+                </button>
+              </div>
+            </div>}
+
+            {/* Step 2: AI Text Interview */}
+            {ipStep===2&&ipMode==="text"&&<div>
               <div className="iv-hd">
                 <div className="iv-hd-l">
                   <div className="iv-hd-av"><I.Bot/></div>

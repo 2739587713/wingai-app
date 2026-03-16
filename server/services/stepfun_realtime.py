@@ -46,7 +46,7 @@ class StepfunRealtimeClient:
         logger.info(f"连接阶跃星辰 Realtime API: {self.model_url}")
         self.ws = await websockets.connect(
             self.model_url,
-            extra_headers=headers,
+            additional_headers=headers,
             ping_interval=20,
             ping_timeout=10,
             max_size=10 * 1024 * 1024,  # 10MB
