@@ -108,9 +108,105 @@ class GeminiClient:
 - closing类型: 结尾总结+号召行动
 """
 
-    async def generate(self, prompt: str, temperature: float = 0.7, max_tokens: int = 8192) -> str:
+    async def generate(self, prompt: str, temperature: float = 0.7, max_tokens: int = 8192, enable_search: bool = False, model_override: str = None) -> str:
         """公共生成方法，内部调用 _call_api"""
-        return await self._call_api(prompt, temperature=temperature, max_tokens=max_tokens)
+        return await self._call_api(prompt, temperature=temperature, max_tokens=max_tokens, enable_search=enable_search, model_override=model_override)
+
+    async def generate_json(
+        self,
+        *,
+        prompt: str,
+        system: str = "",
+        model: str = None,
+        temperature: float = 0.7,
+        max_tokens: int = 8192,
+        retries: int = 3,
+        enable_search: bool = False,
+    ) -> dict:
+        """
+        生成 JSON 并自动解析，支持 model 覆盖、system prompt、重试。
+        前端 generateJSON 的后端等价实现。
+        """
+        use_model = model or self.model
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        for attempt in range(retries):
+            try:
+                messages = []
+                if system:
+                    messages.append({"role": "system", "content": system})
+                messages.append({"role": "user", "content": prompt})
+
+                payload = {
+                    "model": use_model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                }
+                # 首次尝试强制 JSON 模式
+                if attempt == 0:
+                    payload["response_format"] = {"type": "json_object"}
+
+                if enable_search:
+                    payload["enable_search"] = True
+                    payload["search_options"] = {"search_strategy": "max"}
+
+                async with httpx.AsyncClient(timeout=180.0, trust_env=False) as client:
+                    resp = await client.post(
+                        f"{self.base_url}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    )
+                    data = resp.json()
+                    if resp.status_code != 200:
+                        raise RuntimeError(f"API {resp.status_code}: {data}")
+
+                    raw = data["choices"][0]["message"]["content"]
+
+                parsed = self._extract_json(raw)
+                if parsed is not None:
+                    return parsed
+
+                logger.warning(f"generate_json attempt {attempt+1} parse failed, raw[:300]: {raw[:300]}")
+            except Exception as e:
+                logger.warning(f"generate_json attempt {attempt+1} error: {e}")
+                if attempt == retries - 1:
+                    raise
+
+            # 逐次降温提高一致性
+            temperature = max(0.1, temperature - 0.2)
+
+        raise RuntimeError("JSON 解析失败，已耗尽重试次数")
+
+    @staticmethod
+    def _extract_json(text: str):
+        """从可能含 markdown 包裹的文本中提取 JSON 对象或数组"""
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+        # 尝试对象
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start >= 0 and end > start:
+            try:
+                return json.loads(text[start:end])
+            except json.JSONDecodeError:
+                pass
+
+        # 尝试数组
+        start = text.find("[")
+        end = text.rfind("]") + 1
+        if start >= 0 and end > start:
+            try:
+                return json.loads(text[start:end])
+            except json.JSONDecodeError:
+                pass
+
+        return None
 
     async def understand_video(self, video_url: str, prompt: str, max_tokens: int = 8192) -> str:
         """
@@ -232,7 +328,7 @@ class GeminiClient:
             logger.error(f"Gemini图片理解异常: {e}")
             return await self._call_api(prompt, max_tokens=max_tokens)
 
-    async def _call_api(self, prompt: str, max_retries: int = 2, temperature: float = 0.7, max_tokens: int = 8192) -> str:
+    async def _call_api(self, prompt: str, max_retries: int = 2, temperature: float = 0.7, max_tokens: int = 8192, enable_search: bool = False, model_override: str = None) -> str:
         """调用Gemini API (OpenAI兼容格式)"""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -240,13 +336,17 @@ class GeminiClient:
         }
 
         payload = {
-            "model": self.model,
+            "model": model_override or self.model,
             "messages": [
                 {"role": "user", "content": prompt}
             ],
             "temperature": temperature,
             "max_tokens": max_tokens
         }
+
+        if enable_search:
+            payload["enable_search"] = True
+            payload["search_options"] = {"search_strategy": "max"}
 
         for attempt in range(max_retries + 1):
             try:

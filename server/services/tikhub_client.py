@@ -118,7 +118,7 @@ class TikHubClient:
             raw_list = []
             if isinstance(data, dict):
                 if "data" in data and isinstance(data["data"], dict):
-                    raw_list = data["data"].get("data", []) or data["data"].get("aweme_list", [])
+                    raw_list = data["data"].get("data") or data["data"].get("aweme_list") or []
                 elif "data" in data and isinstance(data["data"], list):
                     raw_list = data["data"]
 
@@ -129,8 +129,8 @@ class TikHubClient:
                 statistics = aweme.get("statistics", {})
                 desc = aweme.get("desc", "")
                 hashtags = []
-                for tag in aweme.get("text_extra", []):
-                    if tag.get("hashtag_name"):
+                for tag in (aweme.get("text_extra") or []):
+                    if isinstance(tag, dict) and tag.get("hashtag_name"):
                         hashtags.append(tag["hashtag_name"])
 
                 # 提取封面图
@@ -140,7 +140,7 @@ class TikHubClient:
                     for cover_key in ("origin_cover", "cover", "dynamic_cover"):
                         cover_obj = video_info.get(cover_key, {})
                         if isinstance(cover_obj, dict):
-                            urls = cover_obj.get("url_list", [])
+                            urls = cover_obj.get("url_list") or []
                             if urls:
                                 cover_url = urls[0]
                                 break

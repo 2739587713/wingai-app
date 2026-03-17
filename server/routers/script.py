@@ -229,11 +229,21 @@ async def deep_inspire(request: DeepInspireRequest):
         raise HTTPException(status_code=500, detail=f"灵感获取失败: {str(e)}")
 
 
+class DeepGenerateRequest(BaseModel):
+    ip_context: str = Field(default="", description="创作者IP档案上下文")
+    product_desc: str = Field(default="", description="产品描述/卖点（用户手动填写的）")
+
+
 @router.post("/deep/generate/{session_id}")
-async def deep_generate(session_id: str):
-    """深度模式: 从完整对话上下文生成3个脚本"""
+async def deep_generate(session_id: str, request: DeepGenerateRequest = None):
+    """深度模式: 三步策略从对话生成脚本（Flash提取→Flash大纲→Pro×4展开）"""
     try:
-        result = await script_creator.deep_generate_from_conversation(session_id)
+        body = request or DeepGenerateRequest()
+        result = await script_creator.deep_generate_from_conversation(
+            session_id,
+            ip_context=body.ip_context,
+            product_desc=body.product_desc,
+        )
         scripts = result.get("scripts", [])
         return {
             "success": True,
@@ -244,7 +254,7 @@ async def deep_generate(session_id: str):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"深度模式脚本生成失败: {e}")
+        logger.error(f"深度模式脚本生成失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"生成失败: {str(e)}")
 
 

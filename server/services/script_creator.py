@@ -2941,11 +2941,25 @@ DNA重组规则:
         # 记录用户消息
         deep_ctx["messages"].append({"role": "user", "content": message})
 
-        # 检测工具意图（先用关键词快速判断，再让AI确认）
+        # ── 自动提取产品/行业信息存入 session ──
+        if not session.get("product_name") or not session.get("industry"):
+            self._try_extract_product_industry(message, session)
+
+        # ── 检查是否有上一轮遗留的 pending_tool（用户正在补充信息） ──
+        pending_tool = session.pop("pending_tool", None)
         tool_intent = self._detect_tool_intent(message)
+
+        if pending_tool and not tool_intent:
+            # 用户的回复是对上一轮 need_input 的补充，用当前消息作为关键词重跑那个工具
+            tool_intent = pending_tool
 
         if tool_intent:
             tool_result = await self._execute_deep_tool(tool_intent, message, session)
+
+            # 如果工具又返回 need_input，继续挂起
+            if tool_result.get("data", {}).get("need_input"):
+                session["pending_tool"] = tool_intent
+
             deep_ctx["tool_results"].append(tool_result)
             deep_ctx["messages"].append({"role": "assistant", "content": tool_result.get("summary", "")})
             return {
@@ -2988,7 +3002,7 @@ DNA重组规则:
 回复要简洁专业，不超过200字。回复中不要提及播放量、点赞量、评论数等视频热度数据。"""
 
         try:
-            response = await self.gemini.generate(prompt)
+            response = await self.gemini.generate(prompt, model_override="gemini-3.1-pro-preview")
             if not response or not str(response).strip():
                 response = "我理解你的想法了。你可以告诉我更多细节，或者说'帮我搜一下相关视频'来获取灵感。"
         except Exception as e:
@@ -3023,7 +3037,7 @@ DNA重组规则:
 {chr(10).join(f"{i+1}. {t}" for i, t in enumerate(titles))}
 
 请从上述热搜中选出与「{product}」最相关的10条（可用于内容创作、蹭热点、借势营销）。按相关性从高到低排序，返回JSON数组，格式如 ["热搜1", "热搜2", ...]。只返回数组，不要其他文字。"""
-            resp = await self.gemini.generate(prompt, max_tokens=500)
+            resp = await self.gemini.generate(prompt, max_tokens=500, model_override="gemini-3.1-pro-preview")
             if not resp or not resp.strip():
                 return topics[:10]
             import json
@@ -3059,6 +3073,95 @@ DNA重组规则:
             logger.warning(f"按产品筛选热搜失败: {e}")
             return topics[:10]
 
+    # ── 行业关键词映射表 ──
+    _INDUSTRY_KEYWORDS = {
+        "美妆护肤": ["美妆", "护肤", "化妆品", "面膜", "精华", "防晒", "口红", "粉底", "美白", "祛痘", "乳液", "面霜", "卸妆", "彩妆"],
+        "食品饮料": ["食品", "饮料", "零食", "保健", "奶茶", "咖啡", "茶叶", "酒", "营养", "代餐", "蛋白粉"],
+        "数码3C": ["数码", "3c", "手机", "电脑", "耳机", "键盘", "相机", "平板", "充电", "智能手表", "音箱"],
+        "服装鞋包": ["服装", "穿搭", "鞋", "包", "衣服", "裤子", "外套", "运动鞋", "女装", "男装"],
+        "家居生活": ["家居", "家电", "厨房", "收纳", "清洁", "床品", "灯具", "沙发", "装修"],
+        "教育培训": ["教育", "培训", "课程", "考研", "考公", "英语", "编程", "学习", "网课", "知识付费"],
+        "母婴": ["母婴", "宝宝", "婴儿", "奶粉", "纸尿裤", "儿童", "孕妇", "早教", "辅食"],
+        "宠物": ["宠物", "猫", "狗", "猫粮", "狗粮", "宠物零食", "宠物用品"],
+        "汽车": ["汽车", "车", "新能源", "电车", "suv", "自驾"],
+        "健身运动": ["健身", "运动", "瑜伽", "减脂", "增肌", "跑步", "蛋白粉"],
+    }
+
+    def _try_extract_product_industry(self, message: str, session: Dict):
+        """
+        从用户消息中提取产品名和行业，存入 session。
+        规则：
+        1. "我做XX" / "我们是XX" / "我卖XX" → 提取 XX 为产品/行业
+        2. 消息中命中行业关键词表 → 设置 industry
+        3. 去掉行业词后剩余部分作为 product_name 候选
+        """
+        import re as _re
+        msg = message.strip()
+
+        # 模式1: "我做美妆护肤" / "我们卖面膜" / "产品是智能手表"
+        m = _re.search(r"(?:我做|我们做|我卖|我们卖|我是做|产品是|品牌是|主营)\s*(.+)", msg)
+        if m:
+            extracted = m.group(1).strip().rstrip("的了呢吗哦啊")
+            # 先查行业表
+            for industry, keywords in self._INDUSTRY_KEYWORDS.items():
+                if any(kw in extracted for kw in keywords) or extracted == industry:
+                    session["industry"] = industry
+                    # 去掉行业名看是否还有更具体的产品词
+                    remainder = extracted.replace(industry, "").strip()
+                    if len(remainder) >= 2:
+                        session["product_name"] = remainder
+                    elif not session.get("product_name"):
+                        session["product_name"] = extracted
+                    return
+            # 没匹配到行业表，整段作为产品名
+            if len(extracted) >= 2:
+                session["product_name"] = extracted
+            return
+
+        # 模式2: 消息中散落着行业/产品关键词
+        msg_lower = msg.lower()
+        for industry, keywords in self._INDUSTRY_KEYWORDS.items():
+            for kw in keywords:
+                if kw in msg_lower:
+                    if not session.get("industry"):
+                        session["industry"] = industry
+                    if not session.get("product_name") and len(kw) >= 2:
+                        session["product_name"] = kw
+                    return
+
+    async def _gemini_search_xiaohongshu(self, keyword: str, count: int = 10) -> List[Dict]:
+        """用 Gemini 联网搜索小红书笔记（TikHub 不可用时的备用方案）"""
+        ask = min(count, 8)
+        prompt = f"""搜索小红书(xiaohongshu.com)上关于「{keyword}」的热门笔记，返回{ask}篇。
+
+严格输出JSON数组，每项字段：
+- title: 笔记标题
+- desc: 内容摘要(30字内)
+- liked_count: 点赞数
+- author: 作者昵称
+- type: "normal"或"video"
+- reason: 推荐理由(10字内，如"高赞种草""真实测评""高转化""互动率高""专业成分分析"等)
+- url: 笔记链接(如有，格式为 https://www.xiaohongshu.com/explore/笔记ID，没有则留空字符串)
+
+只输出JSON数组，无其他文字。"""
+
+        try:
+            raw = await self.gemini.generate(
+                prompt,
+                temperature=0.3,
+                max_tokens=4096,
+                enable_search=True,
+            )
+            parsed = GeminiClient._extract_json(raw)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                logger.info(f"Gemini联网搜索小红书成功: {len(parsed)}篇笔记")
+                return parsed[:count]
+            logger.warning(f"Gemini联网搜索小红书解析失败: {raw[:200]}")
+            return []
+        except Exception as e:
+            logger.error(f"Gemini联网搜索小红书异常: {e}")
+            return []
+
     def _detect_tool_intent(self, message: str) -> Optional[str]:
         """从用户消息中检测工具调用意图"""
         msg = message.lower()
@@ -3071,9 +3174,10 @@ DNA重组规则:
         if any(kw in msg for kw in ["搜小红书", "搜笔记", "小红书", "xhs"]):
             return "search_xiaohongshu"
 
-        # 获取热点
+        # 获取热点（排除"用XX热点设计方案"这类对话）
         if any(kw in msg for kw in ["热点", "热搜", "热门话题", "trending"]):
-            return "get_hot_topics"
+            if not any(kw in msg for kw in ["设计", "方案", "创意", "怎么用", "怎么蹭", "用「", "用这个"]):
+                return "get_hot_topics"
 
         # 分析视频链接
         if any(kw in msg for kw in ["分析", "拆解", "拆一下"]) and any(c.isdigit() for c in msg):
@@ -3086,6 +3190,10 @@ DNA重组规则:
         # 找灵感（并行多数据源）
         if any(kw in msg for kw in ["找灵感", "灵感", "创意角度", "帮我找", "给我灵感"]):
             return "get_inspiration"
+
+        # 热点创意方案设计（用XX热点为XX设计方案）
+        if any(kw in msg for kw in ["设计", "方案", "创意"]) and any(kw in msg for kw in ["热点", "热门", "趋势"]):
+            return "design_trend_plan"
 
         return None
 
@@ -3191,7 +3299,41 @@ DNA重组规则:
                 }
 
             elif tool == "search_xiaohongshu":
-                notes = await self.tikhub.search_xiaohongshu(keyword, count=10)
+                generic_xhs = {"小红书", "笔记", "搜笔记", "搜小红书", "xhs", ""}
+                real_kw = keyword.strip()
+                if real_kw in generic_xhs or len(real_kw) < 2:
+                    return {
+                        "tool": "search_xiaohongshu",
+                        "summary": (
+                            "我来帮你搜小红书笔记！先告诉我你想搜什么：\n\n"
+                            "输入产品名或关键词，比如：「搜小红书 美白面膜」「搜小红书 宠物零食」"
+                        ),
+                        "data": {"need_input": True},
+                    }
+                notes = await self.tikhub.search_xiaohongshu(real_kw, count=10)
+
+                # TikHub 小红书端点不可用时，用 Gemini 联网搜索作为备用
+                if not notes:
+                    logger.info(f"TikHub小红书搜索无结果，使用Gemini联网搜索: {real_kw}")
+                    notes = await self._gemini_search_xiaohongshu(real_kw)
+
+                # 为缺少 reason 的笔记（如 TikHub 来源）补充推荐理由
+                for n in notes:
+                    if not n.get("reason"):
+                        lc = n.get("liked_count", 0)
+                        try:
+                            lc_num = int(str(lc).replace(",", "").replace("万", "0000").replace("w", "0000"))
+                        except (ValueError, TypeError):
+                            lc_num = 0
+                        if lc_num >= 10000:
+                            n["reason"] = "高赞爆款"
+                        elif lc_num >= 5000:
+                            n["reason"] = "热门笔记"
+                        elif lc_num >= 1000:
+                            n["reason"] = "优质内容"
+                        else:
+                            n["reason"] = "相关推荐"
+
                 top_notes = notes[:5]
                 summary_parts = [f"找到{len(notes)}篇相关小红书笔记:"]
                 for n in top_notes:
@@ -3204,79 +3346,112 @@ DNA重组规则:
                 }
 
             elif tool == "get_hot_topics":
-                topics = await self.tikhub.get_hot_topics()
                 deep_ctx = session.get("deep_context", {})
                 product = session.get("product_name", "")
+                industry = session.get("industry", "")
 
-                # 取全量热搜标题给 AI，让 AI 筛选出营销相关的热点
-                topics_text = "\n".join(
-                    f"{i+1}. {t.get('title', '')} (热度:{t.get('hot_value', '')})"
-                    for i, t in enumerate(topics[:30])
-                )
+                # ── 判定规则：产品/行业信息是否充足 ──
+                # 1. session 里有明确 product_name 或 industry → 充足
+                # 2. 用户本条消息自带产品/行业词（如"面膜热点""美妆热搜"）→ 从消息提取
+                # 3. 对话历史中提到过产品 → 从历史提取
+                # 4. 都没有 → 引导用户先说清楚
+                if not product:
+                    # 尝试从当前消息中提取产品/行业关键词
+                    import re as _re
+                    # 必须把所有指令词、平台词、语气词都剥干净，只留真正的产品/行业词
+                    cleaned = _re.sub(
+                        r"(热点|热搜|热门话题|热门|trending|帮我|请|看看|有哪些|推荐|相关"
+                        r"|找|搜|搜索|查|给我|我要|我想|一下|看下|有没有"
+                        r"|抖音|小红书|快手|视频|笔记|话题|内容|行业"
+                        r"|的|了|吗|呢|啊|哦|吧)",
+                        "", message
+                    ).strip()
+                    # 清洗后还剩>=2字的实词才算有效产品关键词
+                    if len(cleaned) >= 2:
+                        product = cleaned
 
-                conv_text = "\n".join(
-                    f"{'用户' if m['role'] == 'user' else 'AI'}: {m['content']}"
-                    for m in deep_ctx.get("messages", [])[-6:]
-                )
+                if not product:
+                    # 尝试从对话历史中回溯产品信息
+                    for m in reversed(deep_ctx.get("messages", [])):
+                        if m.get("role") == "user":
+                            c = m.get("content", "")
+                            # 跳过纯指令消息
+                            if any(kw in c for kw in ["热点", "热搜", "找灵感", "搜视频", "搜小红书"]):
+                                continue
+                            if len(c) >= 3:
+                                product = c[:30]
+                                break
 
-                prompt = f"""你是一位短视频营销策划专家。以下是当前抖音热搜榜：
+                if not product and not industry:
+                    # 信息不足 → 引导用户先说清楚
+                    return {
+                        "tool": "get_hot_topics",
+                        "summary": (
+                            "我来帮你找适合蹭的热点！为了推荐更精准，先告诉我：\n\n"
+                            "1️⃣ 你的产品/品牌是什么？（如：美白面膜、智能手表、宠物零食）\n"
+                            "2️⃣ 所在行业？（如：美妆护肤、数码3C、食品饮料）\n\n"
+                            "比如你可以说：「面膜 热点」「美妆行业热搜」「宠物用品有什么热门话题」"
+                        ),
+                        "data": {"need_input": True},
+                    }
 
-{topics_text}
+                # ── 信息充足：用 Gemini 联网搜索当前抖音流行梗/挑战/趋势 ──
+                context_label = product or industry
 
-用户对话上下文：
-{conv_text}
+                prompt = f"""请联网搜索当前抖音（Douyin/TikTok中国版）上正在流行的热门趋势，然后为「{context_label}」（{industry or '未明确行业'}）品牌找出 8-10 个可以借势的热点。
 
-用户产品/方向：{product or '未明确'}
+你需要搜索：
+1. 抖音近期最火的梗、挑战、话题、流行文化现象
+2. 近期热门的 BGM、拍摄手法、叙事模板
+3. 「{context_label}」相关的借势营销案例
 
-请从中筛选出 8-10 个**可以用于内容营销的热点话题**。筛选标准：
-- 可以结合产品/品牌做内容蹭热点的
-- 有情感共鸣、能引发讨论的话题（适合做种草/情感营销）
-- 消费趋势、生活方式类话题
-- 节日/季节/社会热点中有营销切入点的
+这里的「热点」是指：
+✅ 抖音上正在流行的梗、挑战、文化现象（如之前的"刀盾狗""多巴胺穿搭""City不City""你是我的XX"等类似的）
+✅ 可以跟「{context_label}」结合做创意短视频的趋势
+✅ 近期热门的 BGM 和拍摄模板
 
-排除纯娱乐八卦、政治新闻、负面事件等不适合营销的话题。
+不是指：
+❌ 时政新闻、体育赛事、灾难事件
+❌ {context_label}品类本身的产品内容（如面膜测评、面膜推荐——那是"爆款视频"不是"热点"）
 
-对每个选中的话题，给出简短的营销切入建议。
+每个热点的 marketing_angle 必须具体说明「{context_label}」怎么借势——比如"拍一条'给面膜做刀盾狗挑战'的搞笑视频"。
 
-请严格输出 JSON 格式：
-{{"intro": "1-2句开场语，点明当前热点的营销价值", "topics": [{{"title": "热搜标题原文", "hot_value": "原始热度值", "marketing_angle": "15字以内的营销切入角度", "position": 序号}}]}}"""
+严格输出 JSON：
+{{"intro": "1-2句总结当前抖音有哪些值得{context_label}借势的热点趋势", "topics": [{{"title": "热点/梗名称（8字内）", "hot_value": "热度描述", "marketing_angle": "{context_label}怎么蹭这个热点（25字内）", "search_keyword": "用于在抖音搜索该热点参考视频的精准关键词（如'素颜爆改妆容'而非泛泛的'爆改'）", "position": 序号}}]}}"""
 
                 try:
-                    ai_result = await self.gemini.generate(prompt, max_tokens=1500)
-                    # 解析 JSON
-                    import re as _re
-                    json_match = _re.search(r'\{[\s\S]*\}', ai_result)
-                    if json_match:
-                        parsed = json.loads(json_match.group())
-                        ai_topics = parsed.get("topics", [])
-                        summary = parsed.get("intro", "").strip()
-                        # 把 AI 筛选结果格式化为前端需要的格式
-                        marketing_topics = []
-                        for i, mt in enumerate(ai_topics[:10]):
-                            marketing_topics.append({
-                                "title": mt.get("title", ""),
-                                "hot_value": mt.get("hot_value", ""),
-                                "position": i + 1,
-                                "marketing_angle": mt.get("marketing_angle", ""),
-                            })
-                        if not summary:
-                            summary = "以下是当前可结合营销的热点话题，点击可搜索相关爆款视频："
-                    else:
+                    raw = await self.gemini.generate(
+                        prompt, model_override="gemini-3.1-pro-preview",
+                        max_tokens=8192, temperature=0.7,
+                        enable_search=True,
+                    )
+                    parsed = GeminiClient._extract_json(raw)
+                    if not parsed or "topics" not in parsed:
+                        logger.warning(f"热点JSON解析失败, raw[:500]: {raw[:500] if raw else 'empty'}")
                         raise ValueError("AI 未返回有效 JSON")
+
+                    summary = parsed.get("intro", "").strip() or f"为「{context_label}」找到以下可借势的抖音热点："
+                    marketing_topics = []
+                    for i, t in enumerate(parsed["topics"][:10]):
+                        marketing_topics.append({
+                            "title": t.get("title", ""),
+                            "hot_value": t.get("hot_value", ""),
+                            "position": i + 1,
+                            "marketing_angle": t.get("marketing_angle", ""),
+                        })
+
                 except Exception as e:
-                    logger.warning(f"热点AI营销筛选失败: {e}")
-                    summary = "以下是当前抖音热搜中适合营销的话题："
-                    # fallback: 返回原始热搜前10
-                    marketing_topics = [
-                        {"title": t.get("title", ""), "hot_value": t.get("hot_value", ""),
-                         "position": i + 1, "marketing_angle": ""}
-                        for i, t in enumerate(topics[:10])
-                    ]
+                    logger.error(f"热点借势分析失败: {e}", exc_info=True)
+                    return {
+                        "tool": "get_hot_topics",
+                        "summary": f"热点搜索失败：{str(e)[:100]}，请稍后重试",
+                        "data": {"topics": [], "context": context_label},
+                    }
 
                 return {
                     "tool": "get_hot_topics",
                     "summary": summary,
-                    "data": {"topics": marketing_topics},
+                    "data": {"topics": marketing_topics, "context": context_label},
                 }
 
             elif tool == "analyze_video":
@@ -3330,7 +3505,15 @@ DNA重组规则:
                                 product = c[:30]
                                 break
                 if not product:
-                    product = "短视频内容"
+                    return {
+                        "tool": "get_inspiration",
+                        "summary": (
+                            "我来帮你找灵感！先告诉我你的产品或行业：\n\n"
+                            "比如直接输入：「美白面膜」「智能手表」「宠物零食」\n"
+                            "我会并行搜索抖音、小红书、热搜等多个数据源，帮你挖掘创意角度"
+                        ),
+                        "data": {"need_input": True},
+                    }
                 result = await self.deep_get_inspiration(
                     session_id="", product_name=product, industry=industry
                 )
@@ -3347,6 +3530,109 @@ DNA重组规则:
                         "hot_topics": raw_data.get("hot_topics", []),
                         "douyin_videos": raw_data.get("douyin_videos", []),
                         "xhs_notes": raw_data.get("xhs_notes", []),
+                    },
+                }
+
+            elif tool == "design_trend_plan":
+                import re as _re
+
+                # 1. 提取热点名称（「」内）和产品名
+                trend_match = _re.search(r"[「](.+?)[」]", message)
+                trend_name = trend_match.group(1) if trend_match else keyword
+                product_name = session.get("product_name", "")
+                if not product_name:
+                    prod_match = _re.search(r"为(.+?)(设计|创作)", message)
+                    if prod_match:
+                        product_name = prod_match.group(1).replace("的", "").replace("我", "").strip()
+                if not product_name:
+                    return {
+                        "tool": "design_trend_plan",
+                        "summary": "请先告诉我你的产品是什么，我好为你量身定制创意方案",
+                        "data": {"need_input": True},
+                    }
+
+                # 2. 提取精准搜索词（前端通过【搜索词：xxx】传入）
+                sk_match = _re.search(r"【搜索词[：:](.+?)】", message)
+                search_kw = sk_match.group(1).strip() if sk_match else trend_name
+
+                # 搜抖音获取热点参考视频
+                ref_videos_raw = await self.tikhub.search_videos(search_kw, count=10, sort_type=1)
+                ref_videos = []
+                for v in sorted(ref_videos_raw, key=lambda x: x.get("digg_count", 0) or 0, reverse=True)[:5]:
+                    if not (v.get("description") or "").strip():
+                        continue
+                    ref_videos.append({
+                        "video_id": v.get("video_id", ""),
+                        "description": (v.get("description", "") or "")[:80],
+                        "cover_url": v.get("cover_url", ""),
+                        "digg_count": v.get("digg_count", 0) or 0,
+                        "video_url": v.get("video_url", ""),
+                    })
+
+                ref_summary = "\n".join(
+                    f"- {v['description']} (点赞{v['digg_count']})"
+                    for v in ref_videos
+                ) or "（暂无参考视频）"
+
+                # 3. AI 生成 3 个创意方案
+                prompt = f"""你是顶级短视频创意总监。当前抖音热点「{trend_name}」正在流行。
+
+客户产品：{product_name}
+
+抖音上「{trend_name}」的参考爆款视频：
+{ref_summary}
+
+请为「{product_name}」设计3个借势「{trend_name}」热点的短视频创意方案。每个方案风格迥异。
+
+严格输出JSON，所有文本不得包含**加粗标记：
+{{"plans": [
+  {{
+    "title": "方案名称（6字以内）",
+    "subtitle": "一句话概括创意核心（15字以内）",
+    "hook": "开场钩子台词（20-30字，可直接拍）",
+    "description": "详细创意说明：拍摄场景、演员表演、产品植入方式（80-120字）",
+    "steps": ["步骤1：具体拍摄指导", "步骤2", "步骤3", "步骤4"],
+    "style_tags": ["标签1", "标签2", "标签3"]
+  }}
+]}}
+
+要求：
+1. 3个方案风格差异大（搞笑/走心/悬疑/反转等）
+2. 每个必须具体说明「{trend_name}」如何与「{product_name}」结合
+3. hook是可直接拍的台词
+4. steps是具体拍摄步骤，每步15-20字"""
+
+                raw = await self.gemini.generate(
+                    prompt, model_override="gemini-3.1-pro-preview",
+                    max_tokens=8192, temperature=0.8,
+                )
+                parsed = GeminiClient._extract_json(raw)
+                plans = parsed.get("plans", [])[:4] if isinstance(parsed, dict) else []
+
+                # 清理 ** 标记
+                for p in plans:
+                    for key in ("title", "subtitle", "hook", "description"):
+                        if key in p and isinstance(p[key], str):
+                            p[key] = p[key].replace("**", "")
+                    if "steps" in p:
+                        p["steps"] = [s.replace("**", "") for s in p["steps"]]
+
+                if not plans:
+                    return {
+                        "tool": "design_trend_plan",
+                        "summary": (raw or "创意方案生成失败").replace("**", ""),
+                        "data": {},
+                    }
+
+                summary = f"为「{product_name}」x「{trend_name}」设计了{len(plans)}个创意方案"
+                return {
+                    "tool": "design_trend_plan",
+                    "summary": summary,
+                    "data": {
+                        "trend": trend_name,
+                        "product": product_name,
+                        "ref_videos": ref_videos,
+                        "plans": plans,
                     },
                 }
 
@@ -3384,6 +3670,10 @@ DNA重组规则:
         douyin_videos = results[1] if not isinstance(results[1], Exception) else []
         xhs_notes = results[2] if not isinstance(results[2], Exception) else []
         web_results = results[3] if not isinstance(results[3], Exception) else {}
+
+        # TikHub 小红书不可用时，用 Gemini 联网搜索备用
+        if not xhs_notes:
+            xhs_notes = await self._gemini_search_xiaohongshu(product_name)
 
         # 构建数据摘要给Gemini筛选
         data_summary = f"""产品: {product_name}
@@ -3425,7 +3715,7 @@ DNA重组规则:
 4. data_backing 中不要提及播放量、点赞量、评论数等视频热度数据"""
 
         try:
-            result = await self.gemini.generate(prompt)
+            result = await self.gemini.generate(prompt, model_override="gemini-3.1-pro-preview")
             parsed = self._parse_json_response(result)
             if isinstance(parsed, dict) and "inspirations" in parsed:
                 inspirations = parsed["inspirations"]
@@ -3453,14 +3743,21 @@ DNA重组规则:
             },
         }
 
-    async def deep_generate_from_conversation(self, session_id: str) -> Dict:
+    async def deep_generate_from_conversation(
+        self,
+        session_id: str,
+        ip_context: str = "",
+        product_desc: str = "",
+    ) -> Dict:
         """
-        深度模式：从完整对话上下文生成3个脚本
+        深度模式：三步策略从对话上下文生成脚本（与前端 generateJSON 三步对齐）
 
-        保留全部对话洞察（不压缩为product_info），生成更高质量的脚本
+        Step 1 (Flash): 从对话提取产品信息
+        Step 2 (Flash): 设计 4 个差异化大纲
+        Step 3 (Pro × 4 并行): 展开完整脚本（scene/copy/image_prompt 格式）
 
         Returns:
-            {project_id, scripts, session_id}
+            {session_id, scripts: [...]}
         """
         session = self.sessions.get(session_id)
         if not session:
@@ -3468,145 +3765,145 @@ DNA重组规则:
 
         deep_ctx = session.get("deep_context", {})
         messages = deep_ctx.get("messages", [])
-        tool_results = deep_ctx.get("tool_results", [])
-        inspirations = deep_ctx.get("inspirations", [])
 
-        # 构建完整上下文
-        conversation_text = "\n".join(
-            f"{'用户' if m['role'] == 'user' else 'AI'}: {m['content']}"
-            for m in messages[-20:]  # 最近20条
+        # 拼接对话文本
+        chat_ctx = "\n".join(
+            f"{'用户' if m['role'] == 'user' else '顾问'}：{m['content']}"
+            for m in messages[-20:]
         )
 
-        tool_data_text = ""
-        if tool_results:
-            tool_data_text = "\n\n调研数据:\n" + "\n".join(
-                f"[{r.get('tool', '')}] {r.get('summary', '')[:300]}" for r in tool_results[-5:]
-            )
+        # ── Step 1: Flash 提取需求 ──
+        logger.info(f"[深度模式] Step1: 提取需求, session={session_id}")
+        extract_data = await self.gemini.generate_json(
+            model="gemini-3.1-pro-preview",
+            system="你是一位短视频策划专家。从对话中提取关键信息，输出JSON。",
+            prompt=(
+                f"从以下对话中提取脚本创作所需的关键信息：\n\n{chat_ctx}\n\n"
+                f'输出JSON：{{"product":"产品名","category":"品类","duration":"推荐时长",'
+                f'"audience":"目标受众","selling_points":"核心卖点",'
+                f'"style_hints":"对话中提到的风格/策略偏好",'
+                f'"key_context":"其他有价值的上下文"}}'
+            ),
+            temperature=0.3,
+            max_tokens=2048,
+        )
 
-        inspiration_text = ""
-        if inspirations:
-            inspiration_text = "\n\n灵感角度:\n" + "\n".join(
-                f"· {ins.get('angle', '')}: {ins.get('data_backing', '')}" for ins in inspirations
-            )
+        prod = extract_data.get("product") or session.get("product_name") or "产品"
+        cat = extract_data.get("category") or session.get("industry") or "通用"
+        dur = extract_data.get("duration") or "30秒"
 
-        product_name = session.get("product_name", "")
-        industry = session.get("industry", "")
-        target_duration = session.get("target_duration", 60)
+        # ── Step 2: Flash 设计 4 个差异化大纲 ──
+        logger.info(f"[深度模式] Step2: 设计大纲, prod={prod}")
+        risk_rules = "禁止极限词(最好用/第一/唯一) | 禁止医疗词 | 敏感肌→敏敏肌 | 美白→提亮肤色"
+        outlines_data = await self.gemini.generate_json(
+            model="gemini-3.1-pro-preview",
+            system=f"你是一位短视频脚本结构设计师。脚本将通过AI生图+AI生视频制作，不是真人拍摄。{ip_context}",
+            prompt=(
+                f"基于以下深度对话和用户需求，设计4个差异化脚本大纲。\n\n"
+                f"【对话摘要】\n产品：{prod}（{cat}）| 时长：{dur}\n"
+                f"受众：{extract_data.get('audience', '泛人群')}\n"
+                f"卖点：{extract_data.get('selling_points', '未指定')}\n"
+                f"风格偏好：{extract_data.get('style_hints', '未指定')}\n"
+                f"补充：{extract_data.get('key_context', '')}\n\n"
+                f"要求：4个方案视觉风格本质不同（产品大片/对比冲击/知识图解/场景沉浸/"
+                f"故事叙事/种草清单/痛点解决等），name要有创意不要用\"方案一/二/三\"编号。\n"
+                f'JSON：{{"outlines":[{{"name":"有创意的主题名","type":"视觉风格",'
+                f'"emotion":"情绪","shots":6,"strategy":"策略","diff":"区别",'
+                f'"structure":["步骤1","步骤2","步骤3","步骤4","步骤5"]}}]}}'
+            ),
+            temperature=0.5,
+            max_tokens=4096,
+        )
 
-        # 从对话中提取产品信息（如果session中没有）
-        if not product_name:
-            for m in messages:
-                if m["role"] == "user" and len(m["content"]) > 5:
-                    product_name = m["content"][:20]
-                    break
+        outlines = outlines_data.get("outlines", [])
+        if not outlines:
+            raise RuntimeError("未生成大纲")
 
-        category = get_category_knowledge(industry)
-        num_shots = max(6, min(8, target_duration // 8))
+        # ── Step 3: Pro × 4 并行展开 ──
+        logger.info(f"[深度模式] Step3: 并行展开 {len(outlines)} 个脚本")
 
-        prompt = f"""你是顶级短视频编剧。根据以下完整对话上下文和调研数据，生成3个完整脚本。
+        product_info_block = ""
+        if product_desc:
+            product_info_block = f"【⚠️产品真实信息—禁止编造】{product_desc}\n"
 
-对话记录（包含用户的所有需求和偏好）:
-{conversation_text}
-{tool_data_text}
-{inspiration_text}
+        async def expand_one(o: dict) -> Optional[dict]:
+            for att in range(2):
+                try:
+                    r = await self.gemini.generate_json(
+                        model="gemini-3.1-pro-preview",
+                        system=(
+                            f"你是一位顶级短视频脚本创作者+AI视觉导演，台词100%口语化。"
+                            f"脚本将通过AI生图+AI生视频制作。{ip_context}"
+                        ),
+                        prompt=(
+                            f"展开脚本大纲：\n"
+                            f"产品：{prod}（{cat}）| 时长：{dur}\n"
+                            f"{product_info_block}"
+                            f"方案：{o['name']}｜{o.get('type', '')}｜{o.get('emotion', '')}\n"
+                            f"步骤：{'→'.join(o.get('structure', []))}\n"
+                            f"{risk_rules}\n"
+                            f"台词铁律：①100%口语②每句≤15字③自然衔接④开场有钩子抓人"
+                            f"⑤字数匹配时长(4-5字/秒)\n\n"
+                            f"【最重要】视觉一致性：你必须先设计一个visual_anchor对象，"
+                            f"这是保证整个视频视觉统一的关键：\n"
+                            f"- character：固定主角外观（性别年龄发型服装配饰，足够具体"
+                            f"让AI每次画出同一个人），不需要人物则写\"none\"\n"
+                            f"- setting：固定主场景（所有镜头共享同一空间）\n"
+                            f"- product：固定产品外观（极其具体+必须写no text no label no logo）\n"
+                            f"- palette：统一摄影风格（Douyin lifestyle vlog aesthetic）\n"
+                            f"所有字段必须英文！product必须含\"no text no label no logo\"！\n\n"
+                            f"AI画面铁律：scene是中文画面描述，image_prompt是英文(40-80词)，"
+                            f"每个必须以\"no text, no words, no labels in image.\"结尾。\n"
+                            f"badges：2-3个标签，c用conv/exp/auth\n"
+                            f'JSON：{{"name":"{o["name"]}","dur":"{dur}","shots":{o.get("shots", 6)},'
+                            f'"sell":3,"desc":"30字内","badges":[{{"t":"标签","c":"conv"}}],'
+                            f'"visual_anchor":{{"character":"English","setting":"English",'
+                            f'"product":"English with no text no label no logo","palette":"English"}},'
+                            f'"logic":{json.dumps(o.get("structure", []), ensure_ascii=False)},'
+                            f'"table":[{{"shot":1,"dur":"3秒","scene":"中文画面",'
+                            f'"copy":"台词","image_prompt":"English, no text, no words, no labels in image.",'
+                            f'"risk":false,"intent":"情绪+目的"}}]}}'
+                        ),
+                        temperature=0.7,
+                        max_tokens=6144,
+                    )
+                    if r and r.get("table") and len(r["table"]) > 0:
+                        return r
+                    if att == 0:
+                        await asyncio.sleep(2)
+                except Exception as e:
+                    logger.warning(f"展开方案「{o.get('name', '')}」失败(att={att}): {e}")
+                    if att == 0:
+                        await asyncio.sleep(2)
+            return None
 
-产品: {product_name}
-行业: {industry or '未知'}
-目标时长: {target_duration}秒
+        raw_results = await asyncio.gather(*(expand_one(o) for o in outlines))
+        results = [r for r in raw_results if r and r.get("table")]
 
-品类参考:
-- 常用结构: {json.dumps(category['structures'][:2], ensure_ascii=False)}
-- 情绪触发: {json.dumps(category['emotional_triggers'], ensure_ascii=False)}
+        if not results:
+            raise RuntimeError("所有方案生成失败")
 
-请输出JSON（不要其他文字）：
-{{
-  "scripts": [
-    {{
-      "script_id": 0,
-      "name": "脚本名称（体现创意方向）",
-      "risk_level": "safe/moderate/creative",
-      "description": "简短描述此脚本的创意策略",
-      "hook": "开场钩子",
-      "shots": [
-        {{
-          "shot_id": 1,
-          "shot_type": "hook/close_up/medium/wide/product/hands_on/cta",
-          "act_type": "hook/main/cta",
-          "visual_description": "English visual description for AI video generation",
-          "narration": "中文口播文案",
-          "duration": 5.0,
-          "camera_movement": "static/push_in/pull_out/pan/follow",
-          "text_overlay": ""
-        }}
-      ],
-      "total_duration": {target_duration},
-      "selling_points": ["卖点1", "卖点2", "卖点3"]
-    }}
-  ]
-}}
+        # 格式化输出
+        scripts = []
+        for i, s in enumerate(results):
+            scripts.append({
+                "id": i + 1,
+                "name": s.get("name", f"方案{i+1}"),
+                "dur": s.get("dur", dur),
+                "shots": s.get("shots", len(s.get("table", []))),
+                "sell": s.get("sell", 0),
+                "desc": s.get("desc", ""),
+                "badges": s.get("badges", []),
+                "visual_anchor": s.get("visual_anchor", {}),
+                "logic": s.get("logic", []),
+                "table": s.get("table", []),
+            })
 
-要求:
-1. 每个脚本{num_shots}个镜头
-2. 充分利用对话中用户提到的所有需求、偏好、灵感
-3. 如果有调研数据，脚本要体现数据洞察
-4. narration要有感染力，visual_description要具体可执行
-5. 3个脚本风格差异化"""
+        # 更新 session
+        session["product_name"] = prod
+        session["industry"] = cat
 
-        try:
-            result = await self.gemini.generate(prompt)
-            parsed = self._parse_json_response(result)
-            if isinstance(parsed, dict) and "scripts" in parsed:
-                scripts = parsed["scripts"]
-            else:
-                scripts = []
-        except Exception as e:
-            logger.error(f"深度模式脚本生成失败: {e}")
-            scripts = []
-
-        if not scripts:
-            # fallback
-            scripts = self._quick_fallback_scripts(
-                product_name or "产品", industry, target_duration,
-                category.get("creative_approaches", ["痛点故事", "反常识", "悬念叙事"]),
-                category.get("shot_guides", {})
-            ).get("scripts", [])
-
-        # 修复shots格式
-        for script in scripts:
-            shots = script.get("shots", [])
-            for i, shot in enumerate(shots):
-                shot["shot_id"] = i + 1
-                shot.setdefault("shot_type", "medium")
-                shot.setdefault("act_type", "main")
-                shot.setdefault("visual_description", "")
-                shot.setdefault("narration", "")
-                shot.setdefault("duration", 5.0)
-                shot.setdefault("camera_movement", "static")
-                shot.setdefault("lighting", "natural")
-                shot.setdefault("mood", "neutral")
-                shot.setdefault("text_overlay", "")
-                shot.setdefault("use_product_image", shot["shot_type"] in ("product", "hands_on"))
-            script["total_duration"] = sum(s.get("duration", 5) for s in shots)
-
-        # 存储到session
-        session["product_name"] = product_name
-        session["industry"] = industry
-        session["target_duration"] = target_duration
-        session["quick_scripts"] = scripts
-        session["directions"] = [
-            {
-                "direction_id": s.get("script_id", i),
-                "name": s.get("name", ""),
-                "risk_level": s.get("risk_level", "moderate"),
-                "description": s.get("description", ""),
-                "hook": s.get("hook", ""),
-                "structure_preview": [],
-                "creative_techniques": [],
-            }
-            for i, s in enumerate(scripts)
-        ]
-
-        logger.info(f"[深度模式] 从对话生成{len(scripts)}个脚本, session={session_id}")
+        logger.info(f"[深度模式] 生成 {len(scripts)} 个脚本, session={session_id}")
 
         return {
             "session_id": session_id,
