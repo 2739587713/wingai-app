@@ -162,6 +162,10 @@ export default function App(){
   const [finalVideoUrl,setFinalVideoUrl]=useState(null);
   const [sbImgBusy,setSbImgBusy]=useState(false);
   const [vidGenBusy,setVidGenBusy]=useState(false);
+  const isCreating=cs==="ai-generating"||vidGenBusy;
+  const [avatarPreviewImgs,setAvatarPreviewImgs]=useState([]); // 数字人展示图预览
+  const [avatarCleanProdImg,setAvatarCleanProdImg]=useState(null); // 产品精修图
+  const [avatarSelIdx,setAvatarSelIdx]=useState(0); // 用户选择的首帧索引
   const [sbVoice,setSbVoice]=useState("zh-CN-XiaoxiaoNeural");
   const [sbElapsed,setSbElapsed]=useState(0);
   const [anaTab,setAnaTab]=useState(2);
@@ -181,6 +185,28 @@ export default function App(){
   const [extBusy,setExtBusy]=useState(false);
   const [aiGenStep,setAiGenStep]=useState("");
   const [aiScripts,setAiScripts]=useState([]);
+  const [creationHistory,setCreationHistory]=useState(()=>{try{return JSON.parse(localStorage.getItem("creationHistory")||"[]");}catch{return[];}});
+  const saveToHistory=(scripts,meta={})=>{
+    const record={id:Date.now(),time:new Date().toISOString(),prod:meta.prod||prod,cat:meta.cat||cat,dur:meta.dur||dur,mode:meta.mode||"quick",scripts:scripts.map(s=>({name:s.name,dur:s.dur,shots:s.shots,sell:s.sell,desc:s.desc,badges:s.badges,logic:s.logic,table:s.table,visual_anchor:s.visual_anchor,_avatarData:s._avatarData}))};
+    setCreationHistory(prev=>{const next=[record,...prev].slice(0,50);localStorage.setItem("creationHistory",JSON.stringify(next));return next;});
+  };
+  const restoreFromHistory=(record)=>{
+    if(activeCreatePg.current&&isCreating){
+      if(!window.confirm("当前有内容正在生成中，加载历史记录会中断当前任务。确定要继续吗？"))return;
+    }
+    setProd(record.prod||"");setCat(record.cat||"");setDur(record.dur||"30秒");
+    const isAvatar=record.mode==="avatar";
+    setAvatarOn(isAvatar);
+    if(isAvatar){
+      const avatarData=record.scripts?.[0]?._avatarData;
+      if(avatarData?.avatarSel)setAvatarSel(avatarData.avatarSel);
+    }
+    const scripts=record.scripts.map((s,i)=>({...s,id:i+1,badges:s.badges||[],logic:s.logic||[],table:s.table||[]}));
+    setAiScripts(scripts);setPg("create");setCs("results");activeCreatePg.current="create";
+  };
+  const deleteHistoryItem=(id)=>{setCreationHistory(prev=>{const next=prev.filter(r=>r.id!==id);localStorage.setItem("creationHistory",JSON.stringify(next));return next;});};
+  const clearHistory=()=>{if(window.confirm("确认清空所有创作历史？此操作不可恢复。")){setCreationHistory([]);localStorage.removeItem("creationHistory");}};
+
   // tool pages
   const [hotLink,setHotLink]=useState("");
   const [hotIndustry,setHotIndustry]=useState("");
@@ -191,6 +217,17 @@ export default function App(){
   const [posDepth,setPosDepth]=useState("standard");
   const [posDouyinLink,setPosDouyinLink]=useState("");
   const [posCompLinks,setPosCompLinks]=useState("");
+  // hotbreak analysis state
+  const [hotBusy,setHotBusy]=useState(false);
+  const [hotStep,setHotStep]=useState("");
+  const [hotResult,setHotResult]=useState(null);
+  const [hotError,setHotError]=useState("");
+  const [hotScripts,setHotScripts]=useState(null);
+  // pos360 analysis state
+  const [posBusy,setPosBusy]=useState(false);
+  const [posStep,setPosStep]=useState("");
+  const [posResult,setPosResult]=useState(null);
+  const [posError,setPosError]=useState("");
   // avatar page
   const [avSel,setAvSel]=useState(0);
   const [avTheme,setAvTheme]=useState("");
@@ -592,7 +629,8 @@ export default function App(){
   };
 
   const [ci,setCi]=useState("");
-  const [msgs,setMsgs]=useState([{r:"bot",c:"你好！我是你的短视频创作顾问\n\n告诉我你想创作什么内容，或者你的产品/服务是什么——",acts:["找抖音热点","分析爆款案例","获取创作灵感"]}]);
+  const [deepSid,setDeepSid]=useState("");
+  const [msgs,setMsgs]=useState([{r:"bot",c:"你好！我是你的短视频创作顾问\n\n告诉我你想创作什么内容，或者你的产品/服务是什么——",acts:["找抖音热点","搜索爆款视频","搜小红书","帮我找灵感"]}]);
   const chatRef=useRef(null);
   useEffect(()=>{if(chatRef.current)chatRef.current.scrollTop=chatRef.current.scrollHeight;},[msgs]);
 
@@ -782,6 +820,75 @@ export default function App(){
     if(item?.url)return item.url;
     if(item?.b64_json)return "data:image/png;base64,"+item.b64_json;
     throw new Error("未返回图片");
+  };
+  // Browser-side video composition (fallback when FFmpeg unavailable)
+  const browserComposeVideo=async(clips,localAudioUrls,progressCb)=>{
+    const validIdxs=clips.map((c,i)=>c.videoUrl?i:-1).filter(i=>i>=0);
+    if(validIdxs.length===0)return null;
+    if(validIdxs.length===1)return clips[validIdxs[0]].videoUrl;
+    progressCb?.("准备浏览器端合成...");
+    const videoBlobs={};
+    for(let vi=0;vi<validIdxs.length;vi++){
+      const i=validIdxs[vi];
+      progressCb?.(`下载视频片段 ${vi+1}/${validIdxs.length}...`);
+      try{
+        const r=await fetch(`/proxy-download?url=${encodeURIComponent(clips[i].videoUrl)}`);
+        if(!r.ok)throw new Error(`HTTP ${r.status}`);
+        videoBlobs[i]=URL.createObjectURL(await r.blob());
+      }catch(e){console.warn(`[browserCompose] download clip ${i} failed:`,e.message);}
+    }
+    const downloadedIdxs=validIdxs.filter(i=>videoBlobs[i]);
+    if(downloadedIdxs.length===0)return clips[validIdxs[0]].videoUrl;
+    if(downloadedIdxs.length===1){return videoBlobs[downloadedIdxs[0]];}
+    const canvas=document.createElement('canvas');
+    canvas.width=1080;canvas.height=1920;
+    const ctx=canvas.getContext('2d');
+    ctx.fillStyle='#000';ctx.fillRect(0,0,1080,1920);
+    const audioCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:44100});
+    const audioDest=audioCtx.createMediaStreamDestination();
+    const canvasStream=canvas.captureStream(30);
+    const combinedStream=new MediaStream([...canvasStream.getVideoTracks(),...audioDest.stream.getAudioTracks()]);
+    const mimeType=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m))||'video/webm';
+    const recorder=new MediaRecorder(combinedStream,{mimeType,videoBitsPerSecond:6000000});
+    const chunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
+    progressCb?.("浏览器端视频合成中（实时录制）...");
+    recorder.start(500);
+    for(let vi=0;vi<downloadedIdxs.length;vi++){
+      const i=downloadedIdxs[vi];
+      const dur=clips[i].duration||5;
+      progressCb?.(`合成片段 ${vi+1}/${downloadedIdxs.length} (${dur}s)...`);
+      const video=document.createElement('video');
+      video.playsInline=true;video.muted=true;video.preload='auto';video.src=videoBlobs[i];
+      await new Promise((r,j)=>{video.oncanplay=r;video.onerror=()=>j(new Error('load'));video.load();});
+      let audioSrc=null;
+      const aUrl=localAudioUrls?.[i];
+      if(aUrl){try{
+        const aResp=await fetch(aUrl);const aBuf=await aResp.arrayBuffer();
+        const decoded=await audioCtx.decodeAudioData(aBuf);
+        audioSrc=audioCtx.createBufferSource();audioSrc.buffer=decoded;audioSrc.connect(audioDest);
+      }catch(e){console.warn(`[browserCompose] audio ${i}:`,e.message);}}
+      video.currentTime=0;await video.play();
+      if(audioSrc)audioSrc.start();
+      await new Promise(resolve=>{
+        const t0=performance.now();
+        const frame=()=>{
+          const elapsed=(performance.now()-t0)/1000;
+          if(elapsed>=dur){video.pause();if(audioSrc)try{audioSrc.stop();}catch(e){}resolve();return;}
+          if(!video.paused&&!video.ended)ctx.drawImage(video,0,0,1080,1920);
+          requestAnimationFrame(frame);
+        };frame();
+      });
+    }
+    return new Promise(resolve=>{
+      recorder.onstop=()=>{
+        const blob=new Blob(chunks,{type:mimeType.split(';')[0]});
+        Object.values(videoBlobs).forEach(u=>URL.revokeObjectURL(u));
+        audioCtx.close().catch(()=>{});
+        resolve(URL.createObjectURL(blob));
+      };
+      recorder.stop();
+    });
   };
   // Kling API helpers for digital human
   const klingCreate=async(imageUrl,prompt,aspect="9:16",duration="10")=>{
@@ -1067,28 +1174,27 @@ export default function App(){
         narration:s.text||"",
         camera:s.tag==="hook"?"zoom_in":s.tag==="close_up"?"breathe":s.tag==="wide"?"pan_right":"static",
       }));
+      let finalUrl=null;
+      // Try 1: Server-side FFmpeg compose
       try{
         const compR=await fetch("/compose-video",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({clips})});
         const compType=compR.headers.get("Content-Type")||"";
         if(compType.includes("video")){
           const blob=await compR.blob();
-          setFinalVideoUrl(URL.createObjectURL(blob));
-        }else{
-          // Fallback: use browser-side composition or just use first available video
-          const firstVideo=videoUrls.find(v=>v);
-          if(firstVideo)setFinalVideoUrl(firstVideo);
-          else{
-            // Create a simple slideshow blob URL from audio+images in browser
-            const firstAudio=sbShots.find(s=>s.audioUrl)?.audioUrl;
-            if(firstAudio)setFinalVideoUrl(firstAudio);
-          }
+          finalUrl=URL.createObjectURL(blob);
         }
-      }catch(e){
-        console.error("[Video] Compose failed:",e);
-        // Fallback: use first available Kling video
-        const firstVideo=videoUrls.find(v=>v);
-        if(firstVideo)setFinalVideoUrl(firstVideo);
+      }catch(e){console.warn("[Video] FFmpeg compose failed:",e.message);}
+      // Try 2: Browser-side Canvas+MediaRecorder compose
+      if(!finalUrl){
+        try{
+          setSbGenStatus("浏览器端视频合成中...");
+          const localAudios=sbShots.map(s=>s.audioUrl||null);
+          finalUrl=await browserComposeVideo(clips,localAudios,setSbGenStatus);
+        }catch(e){console.warn("[Video] Browser compose failed:",e.message);}
       }
+      // Fallback: first available video
+      if(!finalUrl)finalUrl=videoUrls.find(v=>v)||null;
+      if(finalUrl)setFinalVideoUrl(finalUrl);
       setVgPct(100);setVgStep(4);
       setSbGenStatus("视频生成完成！");
       await new Promise(r=>setTimeout(r,1000));
@@ -1698,63 +1804,8 @@ ${styleList}
     const _startT=Date.now();const _tmr=setInterval(()=>setSbElapsed(Math.round((Date.now()-_startT)/1000)),1000);
 
     try {
-      // ═══ Step 1: 净化产品图 — 白底电商主图 ═══
-      setAiGenStep("正在生成产品精修图（白底电商主图）...");
-      const cleanProductPrompt = `Product photography on pure white background. Take this exact product and render it on a perfectly clean white background. Front-facing view, eye-level angle. 3D render quality, precise color reproduction. Clean all fingerprints, dust and imperfections. Strong lighting with soft shadows for depth. Product labels and text must be sharp and clear. E-commerce hero image standard. The product: ${prodDesc || prod}. Reproduce the exact product from the reference, keep all original colors, materials (glass transparency, matte plastic, metallic shine), shape and proportions.`;
-
-      let cleanProductImg;
-      try {
-        cleanProductImg = await genOneImage(cleanProductPrompt);
-        console.log("[Avatar] Clean product image OK");
-      } catch(e) {
-        console.warn("[Avatar] Clean product image failed, using original:", e.message);
-        cleanProductImg = prodImages[0]; // fallback to original
-      }
-
-      // ═══ Step 2: 合成数字人+产品图 (9:16) ═══
-      setAiGenStep("正在生成数字人展示产品图...");
-      // 生成多张不同姿势的人+产品图，让Kling视频动作更丰富
-      const gender = (avatarSel.tags||"").includes("男") || (avatarSel.tags||"").includes("大叔") ? "He" : "She";
-      const genderCn = gender === "He" ? "他" : "她";
-      const productDesc = prodDesc || prod;
-      const poses = [
-        `${gender} holds the product up at chest height with right hand, left hand relaxed at side, looking directly at camera lens, mouth slightly open mid-sentence`,
-        `${gender} brings the product closer to camera to show details, tilting it slightly, eyebrows raised with genuine interest, leaning forward a bit`,
-        `${gender} holds the product with both hands near chest, natural relaxed smile, head tilted slightly to one side, casual confident pose`,
-      ];
-      const compositeImgs = [];
-      // 真实感prompt核心：强调iPhone自拍、皮肤瑕疵、真实房间背景
-      const realismBase = `RAW photo taken with iPhone 15 Pro front camera, completely unedited and unretouched. Visible skin pores on nose and cheeks, natural slight redness around nose, tiny beauty marks, individual hair strands visible, natural teeth with slight imperfections. NOT a beauty photo, NOT retouched, NOT smooth skin. Real candid selfie vibe. Real lived-in room background: visible furniture, door frame, ceiling light, maybe a plant or some clutter, natural depth. Mixed warm indoor lighting from overhead light and window. Slight noise/grain like a real phone photo. 9:16 vertical portrait format.`;
-      for (let pi = 0; pi < poses.length; pi++) {
-        setAiGenStep(`正在生成数字人展示图 ${pi+1}/${poses.length}...`);
-        const compositePrompt = `${realismBase} ${avatarSel.imgPrompt}. ${poses[pi]}. ${gender} is holding: ${productDesc}. No text, no watermarks, no labels overlaid on image.`;
-        try {
-          const img = await genOneImage(compositePrompt);
-          compositeImgs.push(img);
-          console.log(`[Avatar] Composite image ${pi+1} OK`);
-        } catch(e) {
-          console.warn(`[Avatar] Composite image ${pi+1} failed:`, e.message);
-          setAiGenStep(`展示图 ${pi+1} 失败: ${e.message}，继续尝试...`);
-        }
-      }
-      // 如果全部失败，用更简单的prompt再试一次
-      if (compositeImgs.length === 0) {
-        setAiGenStep("展示图生成失败，正在用简化方案重试...");
-        const simplePrompt = `RAW unedited iPhone selfie of a young Chinese person holding a ${prod}, looking at camera, real room background, visible skin pores, natural lighting, 9:16 vertical. No text no watermarks.`;
-        try {
-          const img = await genOneImage(simplePrompt);
-          compositeImgs.push(img);
-          console.log("[Avatar] Simple fallback image OK");
-        } catch(e2) {
-          // 最后的fallback：直接用avatar预设图
-          setAiGenStep("图片生成失败，使用预设头像...");
-          compositeImgs.push(avatarSel.imgUrl);
-          console.warn("[Avatar] All image gen failed, using preset avatar image");
-        }
-      }
-      const compositeImg = compositeImgs[0];
-
-      // ═══ Step 3: 生成口播脚本（纯文字，不要画面描述）═══
+      // ═══ Step 1: 生成口播脚本（纯文字，不要画面描述）═══
+      // 先生成脚本让用户审核确认，图片生成延后到采纳后进行
       setAiGenStep("正在生成口播脚本...");
       const scriptPrompt = `你是一位抖音带货口播文案高手。请为以下产品生成一段数字人口播文案。
 
@@ -1782,13 +1833,13 @@ ${prodDesc ? "产品描述：" + prodDesc : ""}
       // ═══ 展示结果 — 让用户审核脚本 ═══
       clearInterval(_tmr);
 
-      // Store all data for the video generation step
+      // Store all data for the video generation step (images will be generated after adoption)
       const avatarData = {
-        cleanProductImg,
-        compositeImg,
-        compositeImgs, // 多张不同姿势
         script: cleanScript,
         avatarSel,
+        prodDesc: prodDesc || prod,
+        prod,
+        dur,
       };
 
       // Use aiScripts to store the result (reuse existing UI)
@@ -1800,7 +1851,7 @@ ${prodDesc ? "产品描述：" + prodDesc : ""}
         sell: 0,
         desc: "数字人口播带货视频 — 点击采纳后生成视频",
         badges: [{t: "数字人", c: "conv"}, {t: "口播带货", c: "exp"}],
-        logic: ["产品精修图生成", "数字人+产品合成", "口播脚本生成", "→ 采纳后：TTS配音 → Kling图生视频 → 对口型"],
+        logic: ["口播脚本生成", "→ 采纳后：产品精修图 → 数字人合成 → Kling图生视频"],
         table: [{
           shot: 1,
           dur: dur,
@@ -1815,6 +1866,7 @@ ${prodDesc ? "产品描述：" + prodDesc : ""}
         _avatarData: avatarData,
       }]);
       setCs("results");
+      saveToHistory([{name:`${avatarSel.nm} · ${prod}带货口播`,dur,shots:1,sell:0,desc:"数字人口播带货视频",badges:[{t:"数字人",c:"conv"},{t:"口播带货",c:"exp"}],logic:["口播脚本生成"],table:[{shot:1,dur,scene:"数字人手持产品对镜头口播",copy:cleanScript,image_prompt:"",risk:false,intent:"完整口播带货"}],_avatarData:avatarData}],{mode:"avatar"});
 
     } catch(e) {
       console.error("[Avatar] startAvatarCreate error:", e);
@@ -1825,153 +1877,150 @@ ${prodDesc ? "产品描述：" + prodDesc : ""}
     }
   };
 
-  // ═══════════════ Avatar video generation (TTS → Kling → lip-sync) ═══════════════
-  const generateAvatarVideo = async () => {
+  // ═══════════════ Avatar Phase 1: Generate images for preview ═══════════════
+  const generateAvatarImages = async () => {
     if (!adopted?._avatarData) return;
     setCs("generating");setVidGenBusy(true);setVgPct(0);setVgStep(0);setFinalVideoUrl(null);
+    setAvatarPreviewImgs([]);setAvatarCleanProdImg(null);setAvatarSelIdx(0);
     const _startT=Date.now();const _tmr=setInterval(()=>setSbElapsed(Math.round((Date.now()-_startT)/1000)),1000);
     try {
       const ad = adopted._avatarData;
-      const imgs = ad.compositeImgs || [ad.compositeImg];
 
-      // ═══ Step 1: TTS + 测量音频时长 ═══
-      setVgStep(0);setSbGenStatus("生成TTS配音...");setVgPct(5);
-      const ttsR = await fetch("/edge-tts", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text: ad.script, voice: sbVoice})});
-      if(!ttsR.ok) throw new Error("TTS失败");
-      const ttsBlob = await ttsR.blob();
-      // 测量TTS音频时长
-      const ttsDur = await new Promise(resolve => {
-        const au = new Audio();
-        au.src = URL.createObjectURL(ttsBlob);
-        au.addEventListener("loadedmetadata", () => resolve(au.duration));
-        au.addEventListener("error", () => resolve(30)); // fallback 30s
-      });
-      console.log("[Avatar] TTS duration:", ttsDur, "seconds");
-      setVgPct(10);
+      // ═══ Step 0a: 净化产品图 — 白底电商主图 ═══
+      setSbGenStatus("正在生成产品精修图...");setVgPct(5);
+      const cleanProductPrompt = `Product photography on pure white background. Take this exact product and render it on a perfectly clean white background. Front-facing view, eye-level angle. 3D render quality, precise color reproduction. Clean all fingerprints, dust and imperfections. Strong lighting with soft shadows for depth. Product labels and text must be sharp and clear. E-commerce hero image standard. The product: ${ad.prodDesc}. Reproduce the exact product from the reference, keep all original colors, materials (glass transparency, matte plastic, metallic shine), shape and proportions.`;
+      let cleanProdImg;
+      try {
+        cleanProdImg = await genOneImage(cleanProductPrompt);
+        console.log("[Avatar] Clean product image OK");
+      } catch(e) {
+        console.warn("[Avatar] Clean product image failed, using original:", e.message);
+        cleanProdImg = prodImages[0];
+      }
+      setVgPct(25);
 
-      // ═══ Step 2: 根据音频时长决定需要几个片段 ═══
-      const segCount = Math.max(1, Math.ceil(ttsDur / 10)); // 每段10秒
-      console.log("[Avatar] Need", segCount, "segments for", ttsDur, "s audio");
-      // 确保有足够的图（不够就循环使用）
-      const segImgs = [];
-      for (let i = 0; i < segCount; i++) segImgs.push(imgs[i % imgs.length]);
+      // ═══ Step 0b: 合成数字人+产品图 (9:16) ═══
+      setSbGenStatus("正在生成数字人展示图...");
+      const gender = (ad.avatarSel.tags||"").includes("男") || (ad.avatarSel.tags||"").includes("大叔") ? "He" : "She";
+      const poses = [
+        `${gender} holds the product up at chest height with right hand, left hand relaxed at side, looking directly at camera lens, mouth slightly open mid-sentence`,
+        `${gender} brings the product closer to camera to show details, tilting it slightly, eyebrows raised with genuine interest, leaning forward a bit`,
+        `${gender} holds the product with both hands near chest, natural relaxed smile, head tilted slightly to one side, casual confident pose`,
+      ];
+      const compositeImgs = [];
+      const realismBase = `RAW photo taken with iPhone 15 Pro front camera, completely unedited and unretouched. Visible skin pores on nose and cheeks, natural slight redness around nose, tiny beauty marks, individual hair strands visible, natural teeth with slight imperfections. NOT a beauty photo, NOT retouched, NOT smooth skin. Real candid selfie vibe. Real lived-in room background: visible furniture, door frame, ceiling light, maybe a plant or some clutter, natural depth. Mixed warm indoor lighting from overhead light and window. Slight noise/grain like a real phone photo. 9:16 vertical portrait format.`;
+      for (let pi = 0; pi < poses.length; pi++) {
+        setSbGenStatus(`正在生成数字人展示图 ${pi+1}/${poses.length}...`);
+        const compositePrompt = `${realismBase} ${ad.avatarSel.imgPrompt}. ${poses[pi]}. ${gender} is holding: ${ad.prodDesc}. No text, no watermarks, no labels overlaid on image.`;
+        try {
+          const img = await genOneImage(compositePrompt);
+          compositeImgs.push(img);
+          setVgPct(25 + Math.round(((pi+1)/poses.length) * 75));
+          console.log(`[Avatar] Composite image ${pi+1} OK`);
+        } catch(e) {
+          console.warn(`[Avatar] Composite image ${pi+1} failed:`, e.message);
+        }
+      }
+      if (compositeImgs.length === 0) {
+        setSbGenStatus("展示图生成失败，正在用简化方案重试...");
+        const simplePrompt = `RAW unedited iPhone selfie of a young Chinese person holding a ${ad.prod}, looking at camera, real room background, visible skin pores, natural lighting, 9:16 vertical. No text no watermarks.`;
+        try {
+          const img = await genOneImage(simplePrompt);
+          compositeImgs.push(img);
+        } catch(e2) {
+          setSbGenStatus("图片生成失败，使用预设头像...");
+          compositeImgs.push(ad.avatarSel.imgUrl);
+        }
+      }
+      // ═══ 展示图片预览，让用户选择首帧 ═══
+      setAvatarPreviewImgs(compositeImgs);
+      setAvatarCleanProdImg(cleanProdImg);
+      setAvatarSelIdx(0);
+      clearInterval(_tmr);
+      setSbElapsed(Math.round((Date.now()-_startT)/1000));
+      setCs("avatar-preview");
+    } catch(e) {
+      console.error("[Avatar] Image generation failed:", e);
+      setSbGenStatus("图片生成失败: " + e.message);
+    } finally {
+      setVidGenBusy(false);clearInterval(_tmr);
+    }
+  };
 
-      // ═══ Step 3: 上传图片 + 音频 ═══
-      setSbGenStatus("上传素材...");setVgStep(1);
+  // ═══════════════ Avatar Phase 2: Confirm first frame & generate video ═══════════════
+  const confirmAvatarVideo = async () => {
+    if (!adopted?._avatarData || avatarPreviewImgs.length === 0) return;
+    setCs("generating");setVidGenBusy(true);setVgPct(5);setVgStep(0);setFinalVideoUrl(null);
+    const _startT=Date.now();const _tmr=setInterval(()=>setSbElapsed(Math.round((Date.now()-_startT)/1000)),1000);
+    try {
+      const ad = adopted._avatarData;
+      // 用户选择的首帧排在第一个，其余图片跟在后面
+      const selectedImg = avatarPreviewImgs[avatarSelIdx];
+      const otherImgs = avatarPreviewImgs.filter((_,i) => i !== avatarSelIdx);
+      const imgs = [selectedImg, ...otherImgs];
+
+      // ═══ Step 1: 上传图片 ═══
+      setSbGenStatus("上传素材...");setVgStep(1);setVgPct(10);
       const imgPubs = [];
       const uploadedCache = {};
-      for (let i = 0; i < segImgs.length; i++) {
-        let url = segImgs[i];
+      for (let i = 0; i < imgs.length; i++) {
+        let url = imgs[i];
         if (uploadedCache[url]) { imgPubs.push(uploadedCache[url]); continue; }
         if (!url.startsWith("http")) {
           const blob = await fetch(url).then(r=>r.blob());
           url = await uploadToTmp(blob, `avatar_pose_${i+1}.png`);
         }
-        uploadedCache[segImgs[i]] = url;
+        uploadedCache[imgs[i]] = url;
         imgPubs.push(url);
       }
-      const audioPub = await uploadToTmp(ttsBlob, "tts.mp3");
       setVgPct(15);
 
-      // ═══ Step 4: 把TTS音频按段切分 ═══
-      // 每段时长 = ttsDur / segCount，最后一段可能稍短
-      const segDur = ttsDur / segCount;
-      // 用Web Audio API切分音频
-      setSbGenStatus("切分口播音频...");
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const arrayBuf = await ttsBlob.arrayBuffer();
-      const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
-      const segAudioPubs = [];
-      for (let i = 0; i < segCount; i++) {
-        const start = i * segDur;
-        const end = Math.min((i + 1) * segDur, ttsDur);
-        const len = end - start;
-        const sampleStart = Math.floor(start * audioBuf.sampleRate);
-        const sampleLen = Math.floor(len * audioBuf.sampleRate);
-        const offlineCtx = new OfflineAudioContext(audioBuf.numberOfChannels, sampleLen, audioBuf.sampleRate);
-        const source = offlineCtx.createBufferSource();
-        const segBuf = audioCtx.createBuffer(audioBuf.numberOfChannels, sampleLen, audioBuf.sampleRate);
-        for (let ch = 0; ch < audioBuf.numberOfChannels; ch++) {
-          const orig = audioBuf.getChannelData(ch);
-          const seg = segBuf.getChannelData(ch);
-          for (let s = 0; s < sampleLen && sampleStart + s < orig.length; s++) seg[s] = orig[sampleStart + s];
-        }
-        source.buffer = segBuf;
-        source.connect(offlineCtx.destination);
-        source.start();
-        const rendered = await offlineCtx.startRendering();
-        // 转成WAV blob
-        const wavBlob = audioBufferToWav(rendered);
-        const segUrl = await uploadToTmp(wavBlob, `tts_seg_${i+1}.wav`);
-        segAudioPubs.push(segUrl);
-        console.log(`[Avatar] Audio segment ${i+1}/${segCount}: ${start.toFixed(1)}-${end.toFixed(1)}s uploaded`);
-      }
-      audioCtx.close();
-      setVgPct(25);
-
-      // ═══ Step 5: 并行生成每段的Kling视频 ═══
-      setSbGenStatus(`生成${segCount}段数字人视频（约${segCount * 3}分钟）...`);setVgStep(2);
+      // ═══ Step 2: 根据目标时长决定段数，并行图生视频（Kling，每段10秒） ═══
+      const targetDur = parseInt(ad.dur) || 30;
+      const segCount = Math.max(1, Math.ceil(targetDur / 10));
+      const segImgPubs = [];
+      for (let i = 0; i < segCount; i++) segImgPubs.push(imgPubs[i % imgPubs.length]);
+      setSbGenStatus(`生成${segCount}段数字人视频（共${targetDur}秒，约${segCount * 3}分钟）...`);setVgStep(2);
       const poseDescs = [", presenting the product to camera", ", examining and showing product details", ", demonstrating the product with enthusiasm", ", gesturing while explaining the product", ", holding product up proudly"];
       const basePrompt = "This person is talking directly to camera while holding and presenting a product, natural head movements, slight expression changes, friendly engaging Douyin vlog style";
-      // 并行提交所有Kling任务
-      const klingTasks = await Promise.all(imgPubs.map((url, i) =>
+      const klingTasks = await Promise.all(segImgPubs.map((url, i) =>
         klingCreate(url, basePrompt + (poseDescs[i % poseDescs.length]), "9:16", "10")
           .then(tid => { console.log(`[Avatar] Kling task ${i+1}: ${tid}`); return tid; })
           .catch(e => { console.error(`[Avatar] Kling create ${i+1}:`, e.message); return null; })
       ));
-      // 轮询结果
-      const baseVideoUrls = [];
+      const videoUrls = [];
       for (let i = 0; i < klingTasks.length; i++) {
-        if (!klingTasks[i]) { baseVideoUrls.push(null); continue; }
+        if (!klingTasks[i]) { videoUrls.push(null); continue; }
         setSbGenStatus(`数字人视频 ${i+1}/${segCount} 生成中...`);
         try {
           const url = await klingPollResult(klingTasks[i]);
-          baseVideoUrls.push(url);
-        } catch(e) { console.warn(`[Avatar] Video ${i+1} failed:`, e.message); baseVideoUrls.push(null); }
-        setVgPct(25 + Math.round(((i+1)/segCount) * 30));
+          videoUrls.push(url);
+        } catch(e) { console.warn(`[Avatar] Video ${i+1} failed:`, e.message); videoUrls.push(null); }
+        setVgPct(15 + Math.round(((i+1)/segCount) * 60));
       }
-      if (baseVideoUrls.every(u => !u)) throw new Error("所有基础视频生成失败");
-      setVgPct(55);
+      if (videoUrls.every(u => !u)) throw new Error("所有视频生成失败");
+      setVgPct(80);
 
-      // ═══ Step 6: 每段分别lip-sync ═══
-      setSbGenStatus("对口型中...");setVgStep(3);
-      const lipSyncUrls = [];
-      for (let i = 0; i < segCount; i++) {
-        if (!baseVideoUrls[i]) { lipSyncUrls.push(baseVideoUrls.find(u=>u)); continue; } // 用成功的替代
-        setSbGenStatus(`对口型 ${i+1}/${segCount}...`);
+      // ═══ Step 3: 拼接多段视频（如有多段） ═══
+      const validUrls = videoUrls.filter(u => u);
+      let avatarFinalUrl = null;
+      if (validUrls.length > 1) {
+        setSbGenStatus("合成最终视频...");setVgStep(3);
+        const clips = validUrls.map(url => ({ videoUrl: url, duration: 10 }));
         try {
-          const lsTaskId = await klingLipSync(baseVideoUrls[i], segAudioPubs[i]);
-          const lsUrl = await klingPollResult(lsTaskId, "/kling/v1/videos/lip-sync");
-          lipSyncUrls.push(lsUrl);
-          console.log(`[Avatar] Lip-sync ${i+1} OK`);
-        } catch(e) {
-          console.warn(`[Avatar] Lip-sync ${i+1} failed:`, e.message);
-          lipSyncUrls.push(baseVideoUrls[i]); // fallback用无lip-sync的视频
+          const compR = await fetch("/compose-video", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({clips})});
+          if ((compR.headers.get("Content-Type") || "").includes("video")) {
+            avatarFinalUrl = URL.createObjectURL(await compR.blob());
+          }
+        } catch(e) { console.warn("[Avatar] FFmpeg compose failed:", e.message); }
+        if (!avatarFinalUrl) {
+          try {
+            setSbGenStatus("浏览器端视频合成中...");
+            avatarFinalUrl = await browserComposeVideo(clips, [], setSbGenStatus);
+          } catch(e) { console.warn("[Avatar] Browser compose failed:", e.message); }
         }
-        setVgPct(55 + Math.round(((i+1)/segCount) * 30));
       }
-      setVgPct(85);
-
-      // ═══ Step 7: FFmpeg拼接所有片段 ═══
-      setSbGenStatus("合成最终视频...");setVgStep(3);
-      const clips = lipSyncUrls.filter(u=>u).map((url, i) => ({
-        videoUrl: url,
-        duration: Math.ceil(segDur),
-      }));
-      try {
-        const compR = await fetch("/compose-video", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({clips})});
-        const compType = compR.headers.get("Content-Type") || "";
-        if (compType.includes("video")) {
-          const blob = await compR.blob();
-          setFinalVideoUrl(URL.createObjectURL(blob));
-        } else {
-          // FFmpeg不可用，用第一个lip-sync视频
-          setFinalVideoUrl(lipSyncUrls.find(u=>u) || baseVideoUrls.find(u=>u));
-        }
-      } catch(e) {
-        console.warn("[Avatar] Compose failed:", e.message);
-        setFinalVideoUrl(lipSyncUrls.find(u=>u) || baseVideoUrls.find(u=>u));
-      }
+      setFinalVideoUrl(avatarFinalUrl || validUrls[0]);
       setVgPct(100);
       setVgStep(4);
       setSbGenStatus("数字人视频生成完成！");
@@ -2283,7 +2332,9 @@ JSON格式（严格遵守，不要多余文字）：
       const results=raw.filter(r=>r&&r.table&&r.table.length>0); // 过滤掉失败的空方案
       if(results.length===0)throw new Error("所有方案生成失败，请重试");
 
-      setAiScripts(results.map((s,i)=>({...s,id:i+1,badges:s.badges||[],logic:s.logic||[],table:s.table||[],name:s.name||`方案${i+1}`,dur:s.dur||dur,shots:s.shots||0,sell:s.sell||0,desc:s.desc||""})));
+      const finalScripts=results.map((s,i)=>({...s,id:i+1,badges:s.badges||[],logic:s.logic||[],table:s.table||[],name:s.name||`方案${i+1}`,dur:s.dur||dur,shots:s.shots||0,sell:s.sell||0,desc:s.desc||""}));
+      setAiScripts(finalScripts);
+      saveToHistory(finalScripts,{mode:"quick"});
       setCs("results");
     }catch(e){
       console.error("[AI脚本生成失败]",e);
@@ -2293,23 +2344,110 @@ JSON格式（严格遵守，不要多余文字）：
     }
   };
   const [sendBusy,setSendBusy]=useState(false);
+
+  // ═══ 分析竞品链接 — 纯前端 TikHub + 千问 ═══
+  const analyzeCompetitorLink=async(rawText,msgsSoFar)=>{
+    const updateBot=(text)=>setMsgs(prev=>[...prev.filter(m=>!m.typing),{r:"bot",c:text,typing:true}]);
+    try{
+      let rawUrl=(rawText.match(/https?:\/\/\S+/)||[""])[0].replace(/[.,，。]+$/,"");
+      if(!rawUrl)throw new Error("未检测到有效链接，请粘贴抖音/小红书视频分享链接");
+      updateBot("正在解析链接...");
+      let awemeId="";
+      const aidMatch=rawUrl.match(/video\/(\d{15,})/)||rawUrl.match(/aweme_id=(\d+)/);
+      if(aidMatch)awemeId=aidMatch[1];
+      else{
+        try{
+          const er=await fetch("/expand-url?url="+encodeURIComponent(rawUrl),{signal:AbortSignal.timeout(20000)});
+          const ej=await er.json().catch(()=>({}));
+          if(ej.url)rawUrl=ej.url;
+          const m2=rawUrl.match(/video\/(\d{15,})/)||rawUrl.match(/aweme_id=(\d+)/);
+          if(m2)awemeId=m2[1];
+          if(!awemeId&&ej.body){const m3=ej.body.match(/video\/(\d{15,})/)||ej.body.match(/aweme_id['":\s]+(\d{15,})/);if(m3)awemeId=m3[1];}
+          if(!awemeId){const xm=rawUrl.match(/\/(?:explore|discovery\/item)\/([a-f0-9]{24})/);if(xm)awemeId="xhs_"+xm[1];}
+        }catch(e){console.log("[竞品] expand err:",e.message);}
+        if(!awemeId){
+          updateBot("正在通过TikHub解析链接...");
+          for(const ep of ["/api/v1/douyin/app/v3/fetch_general_douyin_url_data","/api/v1/douyin/web/fetch_general_douyin_url_data"]){
+            try{const u=new URL("/tikhub-proxy"+ep,location.origin);u.searchParams.set("url",rawUrl);
+              const r=await fetch(u,{headers:TH_H});if(r.ok){const d=await r.json();const findId=(o)=>{if(!o||typeof o!=="object")return"";if(o.aweme_id)return String(o.aweme_id);for(const v of Object.values(o)){const f=findId(v);if(f)return f;}return"";};const fid=findId(d);if(fid){awemeId=fid;break;}}}catch{}
+          }
+        }
+      }
+      if(!awemeId)throw new Error("无法从链接中提取视频ID，请确认是否为抖音/小红书视频链接");
+      updateBot("正在获取视频详情...");
+      const isXhs=awemeId.startsWith("xhs_");
+      let videoInfo={aweme_id:awemeId,title:"",author:"",play_count:0,digg_count:0,comment_count:0,share_count:0,duration:0,cover_url:""};
+      if(!isXhs){
+        const detail=await thGet("/api/v1/douyin/web/fetch_one_video",{aweme_id:awemeId});
+        if(detail){const aw=detail?.data?.aweme_detail||detail?.data||{};videoInfo.title=aw.desc||"";videoInfo.author=aw.author?.nickname||"";const st=aw.statistics||{};videoInfo.play_count=st.play_count||0;videoInfo.digg_count=st.digg_count||0;videoInfo.comment_count=st.comment_count||0;videoInfo.share_count=st.share_count||0;videoInfo.duration=aw.duration||aw.video?.duration||0;videoInfo.cover_url=aw.video?.cover?.url_list?.[0]||"";}
+      }
+      updateBot("视频："+( videoInfo.title||awemeId)+"\n作者："+(videoInfo.author||"未知")+"\n正在获取评论和深度分析...");
+      let commentsText="（无评论数据）";
+      const commentsProm=(async()=>{if(isXhs)return;try{const cd=await thGet("/api/v1/douyin/app/v3/fetch_video_comments",{aweme_id:awemeId,count:30});if(cd){const rawList=cd?.data?.comments||cd?.data?.data||[];if(rawList.length>0)commentsText=rawList.slice(0,20).map((c,i)=>(i+1)+". ["+(c.digg_count||0)+"赞] "+(c.text||"")).join("\n");}}catch(e){console.log("[竞品] comments err:",e.message);}})();
+      await commentsProm;
+      updateBot("数据获取完成，千问AI深度分析中...\n视频："+videoInfo.title+"\n作者："+videoInfo.author+"\n点赞："+videoInfo.digg_count.toLocaleString()+" 评论："+videoInfo.comment_count.toLocaleString());
+      const chatCtx=msgsSoFar.filter(m=>m.r==="user"||m.r==="bot").slice(-6).map(m=>(m.r==="user"?"用户":"顾问")+"："+(m.c||"").slice(0,200)).join("\n");
+      const analysisRaw=await callLLM({model:"qwen3-max",system:"你是一位在MCN机构工作8年的短视频操盘手。你擅长深度拆解竞品视频的脚本结构、钩子设计、情绪曲线和转化策略，并给出可落地的优化建议。",
+        prompt:"用户发来一条竞品视频链接，请进行全面深度拆解分析。\n\n## 视频信息\n- 标题："+(videoInfo.title||"未知")+"\n- 作者："+(videoInfo.author||"未知")+"\n- 播放："+(videoInfo.play_count?videoInfo.play_count.toLocaleString():"未知")+"\n- 点赞："+(videoInfo.digg_count?videoInfo.digg_count.toLocaleString():"未知")+"\n- 评论："+(videoInfo.comment_count?videoInfo.comment_count.toLocaleString():"未知")+"\n- 转发："+(videoInfo.share_count?videoInfo.share_count.toLocaleString():"未知")+"\n- 时长："+(videoInfo.duration?Math.round(videoInfo.duration/1000)+"秒":"未知")+"\n- 视频ID："+awemeId+"\n\n## 评论区TOP热评\n"+commentsText+"\n\n## 对话上下文\n"+(chatCtx||"（首次分析）")+"\n\n请完成以下分析，用清晰的结构化格式输出：\n\n### 1. 数据诊断\n互动率、完播率预估、爆款等级判定\n\n### 2. 钩子拆解\n开头前3秒用了什么钩子？类型（反常识/争议/悬念/痛点/视觉冲击/利益承诺），留人原理\n\n### 3. 脚本结构还原\n根据标题和评论推测脚本结构（开头→冲突→产品→转化），每段的情绪走向\n\n### 4. 评论区洞察\n用户最关心什么？最大争议点？隐藏的购买信号？\n\n### 5. 可复用的爆款公式\n提炼出可套用的公式：[X] x [Y] → [Z]\n\n### 6. 优化建议\n如果要做类似内容，3条具体可落地的改进方向\n\n请联网搜索该视频或该作者的更多信息来丰富分析。",
+        temperature:0.3,maxTokens:4096,enableSearch:true});
+      const botMsg={r:"bot",c:analysisRaw,
+        compVideo:{title:videoInfo.title,author:videoInfo.author,play:videoInfo.play_count,digg:videoInfo.digg_count,comment:videoInfo.comment_count,share:videoInfo.share_count,dur:videoInfo.duration,cover:videoInfo.cover_url},
+        acts:["根据这个竞品生成脚本","再分析一条竞品链接","对比多个竞品"]};
+      setMsgs(prev=>[...prev.filter(m=>!m.typing),botMsg]);
+    }catch(e){
+      console.error("[竞品分析]",e);
+      setMsgs(prev=>[...prev.filter(m=>!m.typing),{r:"bot",c:"竞品分析失败："+e.message+"\n\n请检查：\n1. 链接是否为抖音/小红书视频分享链接\n2. 网络是否正常"}]);
+    }
+  };
+
   const send=async(t)=>{
     if(!t.trim()||sendBusy)return;
-    const n=[...msgs,{r:"user",c:t}];setMsgs(n);setCi("");setSendBusy(true);
+    const n=[...msgs,{r:"user",c:t}];setMsgs([...n,{r:"bot",c:"正在思考...",typing:true}]);setCi("");setSendBusy(true);
     try{
-      const ipCtx=getIpContext();
-      const sysMsg=`你是一位资深短视频内容策略顾问，专注于中国短视频平台（抖音、快手、小红书、视频号）。你的职责是：
-1. 深度了解用户的产品/服务、目标受众和痛点
-2. 分析行业趋势、竞品策略，给出有数据支撑的建议
-3. 提供具体、可执行的创意方向
-4. 主动追问关键信息（产品卖点、竞品、目标人群），不要假设
+      // ── 前端拦截：分析竞品链接 ──
+      const hasLink=!!t.match(/https?:\/\/\S+/);
+      const isVideoLink=hasLink&&!!(t.match(/douyin|tiktok|iesdouyin|v\.douyin|xhslink|xiaohongshu/i));
+      const isCompCmd=t==="分析竞品链接";
+      if(isCompCmd){
+        setMsgs(prev=>[...prev.filter(m=>!m.typing),{r:"bot",c:"请粘贴竞品视频链接（支持抖音/小红书），我来帮你深度拆解：\n\n• 脚本结构与钩子设计\n• 情绪曲线与转化策略\n• 评论区洞察\n• 可复用的爆款公式",acts:["我先看看其他功能"]}]);
+        return;
+      }
+      if(isVideoLink){
+        await analyzeCompetitorLink(t,n);
+        return;
+      }
 
-回复要求：简洁有价值，每次200字以内。如果用户提到了具体产品，主动分析该品类的内容趋势。在了解足够信息后，主动建议点击"根据对话生成脚本"按钮。${ipCtx}`;
+      // ── 正常对话走后端 ──
       const chatHist=n.filter(m=>m.r==="user"||m.r==="bot").map(m=>({role:m.r==="user"?"user":"assistant",content:m.c||""}));
-      const reply=await callLLM({model:"gemini-2.5-flash",messages:[{role:"system",content:sysMsg},...chatHist],temperature:0.8,maxTokens:1024});
-      setMsgs(prev=>[...prev,{r:"bot",c:reply}]);
+      const resp=await fetch("/api/script/deep/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:deepSid,message:t,chat_history:chatHist,product_name:null,industry:null})});
+      if(!resp.ok){const txt=await resp.text();throw new Error(`API ${resp.status}: ${txt.slice(0,200)}`);}
+      const data=await resp.json();
+      if(!data.success)throw new Error(data.detail||"对话失败");
+      if(data.session_id&&!deepSid)setDeepSid(data.session_id);
+      const botMsg={r:"bot",c:data.response};
+      if(data.tool_used==="search_douyin"&&data.tool_data?.need_input){
+        botMsg.viralTypes=data.tool_data.viral_types;
+      }else if(data.tool_used==="search_douyin"&&data.tool_data?.videos){
+        botMsg.videos=data.tool_data.videos;
+        botMsg.viralLabel=data.tool_data.viral_label||"";
+      }else if(data.tool_used==="search_xiaohongshu"&&data.tool_data?.notes){
+        botMsg.notes=data.tool_data.notes;
+      }else if(data.tool_used==="get_hot_topics"&&data.tool_data?.topics){
+        botMsg.hots=data.tool_data.topics.map(h=>({t:h.title,ct:h.hot_value?`热度 ${h.hot_value}`:`#${h.position}`,ma:h.marketing_angle||""}));
+      }else if(data.tool_used==="search_web"&&data.tool_data?.sources){
+        botMsg.webResults=data.tool_data.sources;
+      }else if(data.tool_used==="get_inspiration"&&data.tool_data?.inspirations){
+        const ins=data.tool_data.inspirations;
+        const ht=(data.tool_data.hot_topics||[]).slice(0,5);
+        if(ht.length)botMsg.hots=ht.map(h=>({t:h.description||h.title||"",ct:h.hot_value?`热度 ${h.hot_value}`:`#${h.position||""}`}));
+        botMsg.angs=ins.map(a=>({ic:"💡",t:a.angle||"",s:a.source||"",d:a.suggested_hook||a.data_backing||""}));
+        botMsg.sum=ins.map(a=>a.data_backing||"").filter(Boolean).join(" | ");
+      }
+      if(data.script_ready)botMsg.acts=["好的，帮我生成脚本","再聊聊其他方向"];
+      setMsgs(prev=>[...prev.filter(m=>!m.typing),botMsg]);
     }catch(e){
-      setMsgs(prev=>[...prev,{r:"bot",c:"抱歉，网络出了点问题，请重试。"}]);
+      console.error("[deep chat]",e);
+      setMsgs(prev=>[...prev.filter(m=>!m.typing),{r:"bot",c:"网络出了点问题："+e.message+"\n请确保后端已启动(python -m uvicorn main:app --port 8000 --reload)"}]);
     }finally{setSendBusy(false);}
   };
   const isActive=(k)=>pg===k||(k==="aicreate"&&(pg==="create"||pg==="create-deep"||pg==="comic-drama"||pg==="storyboard-wb"));
@@ -2324,6 +2462,96 @@ JSON格式（严格遵守，不要多余文字）：
   );
 
   const pgT={dash:"工作台",tmpl:"模板库",ip:"IP工作室",hotbreak:"爆款深度解析",pos360:"360° 行业定位分析",avatar:"数字人生成",imgtext:"图文AI制作",schedule:"排期发布",adkol:"投流达人",analytics:"数据复盘",history:"内容库",settings:"设置"};
+  // ═══ 爆款深度解析 — analysis pipeline ═══
+  const runHotBreak=async()=>{
+    if(!hotLink.trim()){alert("请粘贴视频链接");return;}
+    setHotBusy(true);setHotStep("解析链接...");setHotError("");setHotResult(null);setHotScripts(null);
+    try{
+      let rawUrl=hotLink.trim();
+      const urlMatch=rawUrl.match(/https?:\/\/\S+/);
+      if(urlMatch)rawUrl=urlMatch[0].replace(/[.,，。]+$/,"");
+      let awemeId="";
+      const aidMatch=rawUrl.match(/video\/(\d{15,})/)||rawUrl.match(/aweme_id=(\d+)/);
+      if(aidMatch)awemeId=aidMatch[1];
+      else{
+        setHotStep("展开短链接...");
+        try{
+          const er=await fetch("/expand-url?url="+encodeURIComponent(rawUrl),{signal:AbortSignal.timeout(20000)});
+          const ej=await er.json().catch(()=>({}));
+          if(ej.url)rawUrl=ej.url;
+          const m2=rawUrl.match(/video\/(\d{15,})/)||rawUrl.match(/aweme_id=(\d+)/);
+          if(m2)awemeId=m2[1];
+          if(!awemeId&&ej.body){const m3=ej.body.match(/video\/(\d{15,})/)||ej.body.match(/aweme_id['":\s]+(\d{15,})/);if(m3)awemeId=m3[1];}
+          if(!awemeId){const xm=rawUrl.match(/\/(?:explore|discovery\/item)\/([a-f0-9]{24})/);if(xm)awemeId="xhs_"+xm[1];}
+        }catch(e){console.log("expand err:",e.message);}
+        if(!awemeId){
+          setHotStep("通过TikHub解析链接...");
+          for(const ep of ["/api/v1/douyin/app/v3/fetch_general_douyin_url_data","/api/v1/douyin/web/fetch_general_douyin_url_data"]){
+            try{const u=new URL("/tikhub-proxy"+ep,location.origin);u.searchParams.set("url",rawUrl);
+              const r=await fetch(u,{headers:TH_H});if(r.ok){const d=await r.json();const findId=(o)=>{if(!o||typeof o!=="object")return"";if(o.aweme_id)return String(o.aweme_id);for(const v of Object.values(o)){const f=findId(v);if(f)return f;}return"";};const fid=findId(d);if(fid){awemeId=fid;break;}}}catch{}
+          }
+        }
+      }
+      if(!awemeId)throw new Error("无法从链接中提取视频ID，请确认链接格式正确");
+      setHotStep("获取视频详情...");
+      let videoInfo={aweme_id:awemeId,title:"",author:"",play_count:0,digg_count:0,comment_count:0,duration:0,cover_url:""};
+      const isXhs=awemeId.startsWith("xhs_");
+      if(!isXhs){
+        const detail=await thGet("/api/v1/douyin/web/fetch_one_video",{aweme_id:awemeId});
+        if(detail){const aw=detail?.data?.aweme_detail||detail?.data||{};videoInfo.title=aw.desc||"";videoInfo.author=aw.author?.nickname||"";const st=aw.statistics||{};videoInfo.play_count=st.play_count||0;videoInfo.digg_count=st.digg_count||0;videoInfo.comment_count=st.comment_count||0;videoInfo.duration=aw.duration||aw.video?.duration||0;videoInfo.cover_url=aw.video?.cover?.url_list?.[0]||"";}
+      }
+      setHotStep("并行分析中（评论+AI深度拆解）...");
+      let commentsText="（无评论数据）";
+      const commentsProm=(async()=>{if(isXhs)return;try{const cd=await thGet("/api/v1/douyin/app/v3/fetch_video_comments",{aweme_id:awemeId,count:30});if(cd){const rawList=cd?.data?.comments||cd?.data?.data||[];if(rawList.length>0)commentsText=rawList.slice(0,20).map((c,i)=>`${i+1}. [${c.digg_count||0}赞] ${c.text||""}`).join("\n");}}catch(e){console.log("comments err:",e.message);}})();
+      const analysisProm=callLLM({model:"gemini-2.5-flash",system:"你是抖音爆款内容分析专家，擅长深度拆解短视频的结构、钩子、情绪曲线、创意装置和口播风格。",
+        prompt:`请对以下视频进行深度结构化分析。\n\n视频信息：\n- 标题：${videoInfo.title||"（未知）"}\n- 作者：${videoInfo.author||"（未知）"}\n- 播放量：${videoInfo.play_count||"未知"}\n- 点赞量：${videoInfo.digg_count||"未知"}\n- 时长：${videoInfo.duration?Math.round(videoInfo.duration/1000)+"秒":"未知"}\n- 视频ID：${awemeId}\n${hotIndustry?"- 所属行业："+hotIndustry:""}\n${hotProduct?"- 用户产品："+hotProduct:""}\n\n请直接输出JSON:\n{"hook":{"type":"钩子类型（反常识/争议/悬念/痛点/视觉冲击/利益承诺）","text":"推测开头第一句","mechanism":"留人原理"},"tension_beats":[{"time_range":"时间段","device":"手法","function":"作用"}],"selling_point_insertion":{"method":"植入方式","timing":"时刻","naturalness":8},"emotional_arc":["情绪1","情绪2","情绪3","情绪4"],"creative_device":{"type":"创意装置类型","description":"具体实现","transferable_formula":"[X]x[Y]→[Z]"},"speaking_style":{"tone":"语气","oral_fragments":["碎片1","碎片2"],"rhythm":"节奏"},"comment_insights":{"top_concerns":["问题"],"emotional_triggers":["触发点"],"controversy":"争议"},"success_core":"一句话总结"}`,
+        temperature:0.3,maxTokens:4096,jsonMode:true});
+      await commentsProm;
+      let analysis=extractJSON(await analysisProm);
+      if(commentsText!=="（无评论数据）"&&analysis){
+        setHotStep("综合评论数据深度分析...");
+        try{const synthRaw=await callLLM({model:"gemini-2.5-flash",system:"你是抖音爆款内容分析专家。",prompt:`基于以下视频分析和评论数据，输出更完整的深度拆解。\n\n## 初步分析\n${JSON.stringify(analysis,null,2)}\n\n## 评论区TOP热评\n${commentsText}\n\n请补充comment_insights并优化其他字段。直接输出完整JSON。`,temperature:0.3,maxTokens:4096,jsonMode:true});const synth=extractJSON(synthRaw);if(synth)analysis=synth;}catch(e){console.log("synthesis err:",e.message);}
+      }
+      setHotResult({videoInfo,commentsText,analysis});
+      setHotStep("正在生成6份优化脚本...");
+      const scriptsRaw=await callLLM({model:"gemini-2.5-pro",system:"你是一位年收入千万的短视频编导，专注将爆款视频拆解后为客户生成可复用的脚本。",
+        prompt:`基于以下爆款视频拆解，为用户生成6份差异化优化脚本。\n\n## 拆解结果\n${JSON.stringify(analysis,null,2)}\n\n## 视频信息\n标题：${videoInfo.title||"未知"} 作者：${videoInfo.author||"未知"} 时长：${videoInfo.duration?Math.round(videoInfo.duration/1000)+"秒":"未知"}\n${hotIndustry?"行业："+hotIndustry:""}\n${hotProduct?"用户产品："+hotProduct:""}\n${hotReq?"具体要求："+hotReq:""}\n\n## 评论\n${commentsText}\n\nJSON：{"scripts":[{"name":"脚本名","type":"类型","duration":"时长","emotion_arc":"情绪曲线","strategy":"策略","shots":[{"shot":1,"dur":"3秒","scene":"画面","copy":"台词","intent":"目的"}]}]}\n\n6个策略各不同：①原版复刻②反转升级③情感共鸣④数据实验⑤故事叙事⑥争议悬念`,
+        temperature:0.6,maxTokens:8192,jsonMode:true});
+      const sp=extractJSON(scriptsRaw);if(sp?.scripts)setHotScripts(sp.scripts);
+      setHotStep("分析完成");
+    }catch(e){console.error("[hotbreak]",e);setHotError(e.message||"分析失败");setHotStep("");}finally{setHotBusy(false);}
+  };
+
+  // ═══ 360° 行业定位分析 — analysis pipeline ═══
+  const runPos360=async()=>{
+    if(!posMain.trim()){alert("请输入你的主要业务");return;}
+    setPosBusy(true);setPosStep("开始分析...");setPosError("");setPosResult(null);
+    try{
+      const industry=posInd||posMain;const depth=posDepth;const compLinks=posCompLinks.trim().split("\n").filter(Boolean);
+      setPosStep("正在搜索行业数据和趋势...");
+      const researchRaw=await callLLM({model:"qwen3-max",system:"你是一位资深的短视频行业分析师，擅长通过搜索引擎获取最新的行业数据和趋势。",
+        prompt:`针对「${posMain}」（${industry}行业）进行全面的抖音短视频行业调研。\n\n需要覆盖：\n1. 行业现状（搜索热度、内容量、用户关注度）\n2. 用户画像（看什么、搜什么、买什么）\n3. 内容趋势（近3个月最火形式和话题）\n4. 头部账号（5-10个，名称+粉丝+特点+爆款特征）\n5. 蓝海机会（竞争少但需求在的方向）\n6. 变现模式\n${depth==="deep"?"7. 算法偏好\n8. 季节性趋势":""}`,
+        temperature:0.3,maxTokens:depth==="deep"?8192:depth==="standard"?6144:4096,enableSearch:true});
+      let compAnalysis="";
+      if(compLinks.length>0){
+        setPosStep("分析竞品账号...");const compInfos=[];
+        for(const link of compLinks.slice(0,3)){try{let cUrl=link.trim();const cMatch=cUrl.match(/https?:\/\/\S+/);if(cMatch)cUrl=cMatch[0];const er=await fetch("/expand-url?url="+encodeURIComponent(cUrl),{signal:AbortSignal.timeout(15000)}).catch(()=>null);if(er){const ej=await er.json().catch(()=>({}));if(ej.url)cUrl=ej.url;}compInfos.push(cUrl);}catch{}}
+        if(compInfos.length>0)compAnalysis=await callLLM({model:"qwen3-max",system:"你是短视频竞品分析专家。",prompt:`分析以下竞品抖音链接的内容策略：\n${compInfos.map((l,i)=>`${i+1}. ${l}`).join("\n")}\n\n我的业务：${posMain}（${industry}）\n\n分析每个竞品：1.定位风格 2.内容策略 3.爆款规律 4.优势和可学习点 5.劣势和差异化机会`,temperature:0.3,maxTokens:4096,enableSearch:true});
+      }
+      let selfAnalysis="";
+      if(posDouyinLink.trim()){
+        setPosStep("分析你的账号...");
+        selfAnalysis=await callLLM({model:"qwen3-max",system:"你是短视频账号诊断专家。",prompt:`分析这个抖音账号：\n链接：${posDouyinLink}\n行业：${industry}\n业务：${posMain}\n\n诊断：1.定位清晰度 2.内容策略优缺点 3.与头部差距 4.最需改进的3方面`,temperature:0.3,maxTokens:3072,enableSearch:true});
+      }
+      setPosStep("生成定位报告...");
+      const reportRaw=await callLLM({model:"gemini-2.5-pro",system:"你是顶级短视频内容策略师，帮助企业在抖音精准定位。输出JSON。",
+        prompt:`为「${posMain}」（${industry}）生成360°定位报告。\n\n## 行业调研\n${researchRaw}\n${compAnalysis?"## 竞品分析\n"+compAnalysis:""}\n${selfAnalysis?"## 账号现状\n"+selfAnalysis:""}\n\nJSON：\n{"industry_overview":{"market_size":"规模","growth_trend":"趋势","competition_level":"低/中/高/极高","opportunity_score":8},"target_audience":{"primary":"核心画像","demographics":"特征","pain_points":["痛点1","痛点2"],"content_preferences":["偏好1","偏好2"]},"competitive_landscape":{"top_players":[{"name":"账号","followers":"粉丝","strength":"优势","content_type":"类型"}],"gaps":["空白"],"differentiation_opportunities":["机会"]},"positioning_recommendation":{"core_positioning":"定位一句话","content_pillars":[{"pillar":"支柱","description":"描述","frequency":"频率"}],"tone_style":"调性","visual_identity":"视觉"},"content_strategy":{"hero_content":"杀手锏方向","quick_wins":["快速起量方向"],"long_term_plays":["长期建设"],"content_calendar":[{"week":"第1周","theme":"主题","content_types":["类型"],"count":3}]},"monetization":{"primary_model":"主变现","secondary_models":["辅助"],"estimated_timeline":"周期"},"action_plan":[{"priority":"P0","action":"行动","timeline":"时间"}]}`,
+        temperature:0.4,maxTokens:8192,jsonMode:true});
+      const report=extractJSON(reportRaw);if(!report)throw new Error("报告生成失败，请重试");
+      setPosResult(report);setPosStep("分析完成");
+    }catch(e){console.error("[pos360]",e);setPosError(e.message||"分析失败");setPosStep("");}finally{setPosBusy(false);}
+  };
+
 
   return(
     <><style>{`
@@ -2833,6 +3061,8 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--s2);color:var(--t1);
 .cbr{padding:12px 20px;border-top:1px solid var(--bl);background:var(--s);display:flex;gap:8px;align-items:center}
 .cin{flex:1;padding:10px 14px;border:1.5px solid var(--bl);border-radius:12px;font-size:13px;font-family:inherit;background:var(--s);transition:var(--tr)}.cin:focus{outline:none;border-color:var(--p);box-shadow:0 0 0 3px var(--pg)}.cin::placeholder{color:var(--t3)}
 .csb{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--p),var(--pl));color:#fff;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;box-shadow:0 2px 8px rgba(124,58,237,.25);transition:var(--tr)}.csb:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(124,58,237,.3)}
+@keyframes typingPulse{0%,100%{opacity:.4}50%{opacity:1}}
+.typing-dots{animation:typingPulse 1.2s ease-in-out infinite}
 .cmb{width:38px;height:38px;border-radius:10px;background:var(--s);color:var(--t3);border:1.5px solid var(--bl);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:var(--tr)}.cmb:hover{border-color:var(--pl);color:var(--p)}
 .cgb{margin:0 20px 12px;padding:12px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--p),var(--pl));color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;box-shadow:0 4px 16px rgba(124,58,237,.25);transition:var(--tr)}.cgb:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(124,58,237,.3)}
 /* deep sidebar */
@@ -3306,7 +3536,7 @@ div:hover>.sch-inline-del{opacity:1 !important}
                 else setPg(it.k);
               }}>
               {it.icon} {it.label}
-              {it.k==="history"&&<span className="sb-tag" style={{background:"var(--pbg)",color:"var(--p)"}}>28</span>}
+              {it.k==="history"&&creationHistory.length>0&&<span className="sb-tag" style={{background:"var(--pbg)",color:"var(--p)"}}>{creationHistory.length}</span>}
             </div>
           </div>)}
         </div>)}
@@ -3322,6 +3552,23 @@ div:hover>.sch-inline-del{opacity:1 !important}
       </div>
 
       <div className="mn">
+        {/* floating generation banner */}
+        {activeCreatePg.current&&!pg.startsWith("create")&&isCreating&&<div style={{position:"sticky",top:0,zIndex:90,padding:"10px 20px",background:"linear-gradient(135deg,#7C3AED,#6D28D9)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",animation:"mIn .3s ease"}} onClick={()=>setPg(activeCreatePg.current)}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{display:"inline-block",width:16,height:16,border:"2.5px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin .8s linear infinite",flexShrink:0}}/>
+            <span style={{fontSize:13,fontWeight:600}}>{vidGenBusy?(sbGenStatus||"图片/视频生成中…"):"AI正在生成脚本…"}</span>
+            <span style={{fontSize:12,opacity:.8}}>（{prod} · {dur}）</span>
+          </div>
+          <span style={{fontSize:12,fontWeight:600,padding:"4px 14px",background:"rgba(255,255,255,.2)",borderRadius:6}}>返回查看 →</span>
+        </div>}
+        {activeCreatePg.current&&!pg.startsWith("create")&&cs==="results"&&aiScripts.length>0&&<div style={{position:"sticky",top:0,zIndex:90,padding:"10px 20px",background:"linear-gradient(135deg,#059669,#10B981)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",animation:"mIn .3s ease"}} onClick={()=>setPg(activeCreatePg.current)}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <I.Check/>
+            <span style={{fontSize:13,fontWeight:600}}>脚本生成完成！共 {aiScripts.length} 个方案</span>
+            <span style={{fontSize:12,opacity:.8}}>（{prod}）</span>
+          </div>
+          <span style={{fontSize:12,fontWeight:600,padding:"4px 14px",background:"rgba(255,255,255,.2)",borderRadius:6}}>返回查看 →</span>
+        </div>}
         {/* TOPBAR */}
         {!pg.startsWith("create")&&<div className="tb">
           <div className="tb-t">{pgT[pg]||"工作台"}</div>
@@ -4547,10 +4794,37 @@ div:hover>.sch-inline-del{opacity:1 !important}
             <div className="hist-hd-t">内容库</div>
             <div className="hist-hd-d">管理与回顾您的选题、脚本与视频，每一份创意都值得精准留存</div>
           </div>
-          <div className="hist-tabs">
-            {["选题","脚本","视频"].map((t,i)=><button key={i} className={`hist-tab ${histTab===i?"on":""}`} onClick={()=>setHistTab(i)}>{t}</button>)}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+            <div className="hist-tabs">
+              {["全部","快速模式","深度定制","数字人"].map((t,i)=><button key={i} className={`hist-tab ${histTab===i?"on":""}`} onClick={()=>setHistTab(i)}>{t}</button>)}
+            </div>
+            {creationHistory.length>0&&<button style={{padding:"6px 14px",border:"1.5px solid #F87171",borderRadius:8,background:"#FFF5F5",color:"#EF4444",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={clearHistory}>清空历史</button>}
           </div>
-          <div className="hist-empty">暂无选题</div>
+          {(()=>{
+            const modeMap=["","quick","deep","avatar"];
+            const filtered=histTab===0?creationHistory:creationHistory.filter(r=>r.mode===modeMap[histTab]);
+            if(filtered.length===0)return <div className="hist-empty">{histTab===0?"暂无创作记录，去快速模式创建第一个脚本吧":"该分类暂无记录"}</div>;
+            return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>{filtered.map(r=>{
+              const modeLabel=r.mode==="deep"?"深度定制":r.mode==="avatar"?"数字人":"快速模式";
+              const modeColor=r.mode==="deep"?"#8B5CF6":r.mode==="avatar"?"#14B8A6":"#F59E0B";
+              const timeStr=(()=>{const d=new Date(r.time);const now=new Date();const diff=now-d;if(diff<60000)return"刚刚";if(diff<3600000)return Math.floor(diff/60000)+"分钟前";if(diff<86400000)return Math.floor(diff/3600000)+"小时前";if(diff<604800000)return Math.floor(diff/86400000)+"天前";return d.toLocaleDateString("zh-CN",{month:"short",day:"numeric"});})();
+              return <div key={r.id} style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:14,padding:18,cursor:"pointer",transition:"all .25s ease"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--pl)";e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 4px 14px rgba(0,0,0,.06)";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--bl)";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}} onClick={()=>restoreFromHistory(r)}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:modeColor+"18",color:modeColor,fontWeight:600}}>{modeLabel}</span>
+                  <span style={{fontSize:11,color:"var(--t3)"}}>{timeStr}</span>
+                </div>
+                <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>{r.prod||"未命名"}</div>
+                <div style={{fontSize:11,color:"var(--t3)",marginBottom:10,display:"flex",gap:12}}>
+                  <span>品类：{r.cat||"通用"}</span><span>时长：{r.dur||"--"}</span><span>方案：{r.scripts?.length||0}个</span>
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:10}}>{(r.scripts||[]).slice(0,3).map((s,i)=><span key={i} style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:"var(--s3)",color:"var(--t2)"}}>{s.name}</span>)}</div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:11,color:"var(--p)",fontWeight:500,display:"flex",alignItems:"center",gap:3}}>点击继续编辑 <I.ChevronR/></span>
+                  <button style={{border:"none",background:"none",cursor:"pointer",color:"var(--t3)",padding:4}} onClick={e=>{e.stopPropagation();deleteHistoryItem(r.id);}}><I.Trash/></button>
+                </div>
+              </div>;
+            })}</div>;
+          })()}
         </div>}
         {pg==="settings"&&<Placeholder title="设置" desc="账户设置、团队管理、API对接" icon="⚙️"/>}
 
@@ -4564,32 +4838,105 @@ div:hover>.sch-inline-del{opacity:1 !important}
           <div className="tool-form">
             <div className="tool-fg">
               <div className="tool-fg-l">请粘贴抖音分享链接（完整分享链接） <span className="rq">*</span></div>
-              <input className="tool-inp" value={hotLink} onChange={e=>setHotLink(e.target.value)} placeholder="请粘贴抖音分享链接（完整分享链接）"/>
+              <input className="tool-inp" value={hotLink} onChange={e=>setHotLink(e.target.value)} placeholder="请粘贴抖音分享链接（完整分享链接）" disabled={hotBusy}/>
             </div>
             <div className="tool-row">
               <div className="tool-fg">
                 <div className="tool-fg-l">所属行业</div>
-                <select className="tool-sel" value={hotIndustry} onChange={e=>setHotIndustry(e.target.value)}>
+                <select className="tool-sel" value={hotIndustry} onChange={e=>setHotIndustry(e.target.value)} disabled={hotBusy}>
                   <option value="">选择目标行业</option><option>美妆护肤</option><option>食品保健</option><option>数码3C</option><option>教育培训</option><option>服装鞋包</option><option>家居生活</option>
                 </select>
               </div>
               <div className="tool-fg">
                 <div className="tool-fg-l">你的产品/服务是什么？</div>
-                <input className="tool-inp" value={hotProduct} onChange={e=>setHotProduct(e.target.value)} placeholder="例如：补水保湿面膜 / 线上英语课程"/>
+                <input className="tool-inp" value={hotProduct} onChange={e=>setHotProduct(e.target.value)} placeholder="例如：补水保湿面膜 / 线上英语课程" disabled={hotBusy}/>
               </div>
             </div>
             <div className="tool-fg">
               <div className="tool-fg-l">对改写脚本的具体要求</div>
-              <textarea className="tool-inp" rows={4} value={hotReq} onChange={e=>setHotReq(e.target.value)} placeholder="例如：30秒以内、适合信息流投放、语气专业可信、突出痛点和解决方案等" style={{resize:"vertical"}}/>
+              <textarea className="tool-inp" rows={4} value={hotReq} onChange={e=>setHotReq(e.target.value)} placeholder="例如：30秒以内、适合信息流投放、语气专业可信、突出痛点和解决方案等" style={{resize:"vertical"}} disabled={hotBusy}/>
             </div>
-            <button className="tool-btn blue"><I.Zap/> 生成爆款拆解报告</button>
-            <div className="tool-hint">AI将为您深度分析视频结构、情绪曲线及爆款逻辑，并生成6份优化脚本<br/>支持抖音和小红书分享链接（小红书暂不支持评论区与作者数据分析）</div>
+            <button className="tool-btn blue" onClick={runHotBreak} disabled={hotBusy} style={hotBusy?{opacity:.7,cursor:"not-allowed"}:{}}>{hotBusy?<><span style={{width:14,height:14,border:"2px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%",display:"inline-block",animation:"spin .6s linear infinite"}}/> {hotStep}</>:<><I.Zap/> 生成爆款拆解报告</>}</button>
+            <div className="tool-hint">AI将为您深度分析视频结构、情绪曲线及爆款逻辑，并生成6份优化脚本<br/>支持抖音和小红书分享链接</div>
           </div>
-          <div className="tool-empty">
+          {hotError&&<div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:12,padding:"14px 18px",marginTop:16,color:"#DC2626",fontSize:13,fontWeight:500}}>{hotError}</div>}
+          {hotBusy&&!hotResult&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:32,marginTop:16,textAlign:"center"}}><div style={{fontSize:14,fontWeight:600,color:"var(--t1)",marginBottom:8}}>{hotStep}</div><div style={{width:200,height:4,background:"var(--s3)",borderRadius:2,margin:"0 auto",overflow:"hidden"}}><div style={{width:"60%",height:"100%",background:"#3B82F6",borderRadius:2,animation:"vgShimmer 1.5s infinite linear",backgroundSize:"200% 100%",backgroundImage:"linear-gradient(90deg,#3B82F6 25%,#60A5FA 50%,#3B82F6 75%)"}}/></div></div>}
+          {hotResult&&hotResult.analysis&&(()=>{const a=hotResult.analysis;const vi=hotResult.videoInfo;return<div style={{marginTop:16}}>
+            {vi.title&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>视频信息</div>
+              <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>{vi.title}</div>
+              <div style={{display:"flex",gap:16,fontSize:12,color:"var(--t2)",flexWrap:"wrap"}}>
+                {vi.author&&<span>作者：{vi.author}</span>}
+                {vi.play_count>0&&<span>播放：{vi.play_count>=10000?(vi.play_count/10000).toFixed(1)+"w":vi.play_count}</span>}
+                {vi.digg_count>0&&<span>点赞：{vi.digg_count>=10000?(vi.digg_count/10000).toFixed(1)+"w":vi.digg_count}</span>}
+                {vi.comment_count>0&&<span>评论：{vi.comment_count}</span>}
+                {vi.duration>0&&<span>时长：{Math.round(vi.duration/1000)}s</span>}
+              </div>
+            </div>}
+            <div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>钩子分析</div>
+              {a.hook&&<div><div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}><span style={{background:"#DBEAFE",color:"#2563EB",padding:"2px 10px",borderRadius:6,fontSize:11,fontWeight:600}}>{a.hook.type||"钩子"}</span></div>
+              <div style={{fontSize:14,fontWeight:600,marginBottom:4,color:"var(--t1)"}}>{a.hook.text}</div>
+              <div style={{fontSize:12,color:"var(--t2)"}}>{a.hook.mechanism}</div></div>}
+            </div>
+            {a.tension_beats&&a.tension_beats.length>0&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>节奏节拍</div>
+              {a.tension_beats.map((b,i)=><div key={i} style={{display:"flex",gap:12,marginBottom:8,fontSize:13,alignItems:"flex-start"}}><span style={{background:"#EFF6FF",color:"#3B82F6",padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>{b.time_range}</span><div><span style={{fontWeight:600}}>{b.device}</span><span style={{color:"var(--t2)",marginLeft:6}}>{b.function}</span></div></div>)}
+            </div>}
+            {a.emotional_arc&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>情绪曲线</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{(Array.isArray(a.emotional_arc)?a.emotional_arc:String(a.emotional_arc).split("→")).map((e,i,arr)=><span key={i} style={{display:"flex",alignItems:"center",gap:4}}><span style={{background:"linear-gradient(135deg,#3B82F6,#8B5CF6)",color:"#fff",padding:"4px 12px",borderRadius:8,fontSize:12,fontWeight:600}}>{String(e).trim()}</span>{i<arr.length-1&&<span style={{color:"var(--t3)"}}>→</span>}</span>)}</div>
+            </div>}
+            {a.selling_point_insertion&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>卖点植入</div>
+              <div style={{fontSize:13}}><span style={{fontWeight:600}}>方式：</span>{a.selling_point_insertion.method} <span style={{fontWeight:600,marginLeft:12}}>时机：</span>{a.selling_point_insertion.timing} <span style={{fontWeight:600,marginLeft:12}}>自然度：</span><span style={{color:a.selling_point_insertion.naturalness>=7?"#10B981":"#F59E0B",fontWeight:700}}>{a.selling_point_insertion.naturalness}/10</span></div>
+            </div>}
+            {a.creative_device&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>创意装置</div>
+              <div style={{marginBottom:6}}><span style={{background:"#F0FDF4",color:"#16A34A",padding:"2px 10px",borderRadius:6,fontSize:11,fontWeight:600}}>{a.creative_device.type}</span></div>
+              <div style={{fontSize:13,marginBottom:4}}>{a.creative_device.description}</div>
+              <div style={{fontSize:12,color:"#7C3AED",fontWeight:600,background:"#F5F0FF",padding:"6px 12px",borderRadius:8,display:"inline-block"}}>可迁移公式：{a.creative_device.transferable_formula}</div>
+            </div>}
+            {a.speaking_style&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>口播风格</div>
+              <div style={{fontSize:13}}><span style={{fontWeight:600}}>语气：</span>{a.speaking_style.tone} <span style={{fontWeight:600,marginLeft:12}}>节奏：</span>{a.speaking_style.rhythm}</div>
+              {a.speaking_style.oral_fragments&&<div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>{a.speaking_style.oral_fragments.map((f,i)=><span key={i} style={{background:"#FEF3C7",color:"#B45309",padding:"2px 8px",borderRadius:4,fontSize:11}}>{f}</span>)}</div>}
+            </div>}
+            {a.comment_insights&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>评论洞察</div>
+              {a.comment_insights.top_concerns&&<div style={{marginBottom:8}}><span style={{fontSize:12,fontWeight:600}}>观众关心：</span>{a.comment_insights.top_concerns.map((c,i)=><span key={i} style={{background:"#EFF6FF",color:"#2563EB",padding:"2px 8px",borderRadius:4,fontSize:11,marginLeft:4}}>{c}</span>)}</div>}
+              {a.comment_insights.emotional_triggers&&<div style={{marginBottom:8}}><span style={{fontSize:12,fontWeight:600}}>情绪触发：</span>{a.comment_insights.emotional_triggers.map((t,i)=><span key={i} style={{background:"#FEF2F2",color:"#DC2626",padding:"2px 8px",borderRadius:4,fontSize:11,marginLeft:4}}>{t}</span>)}</div>}
+              {a.comment_insights.controversy&&<div><span style={{fontSize:12,fontWeight:600}}>争议点：</span><span style={{fontSize:12,color:"var(--t2)"}}>{a.comment_insights.controversy}</span></div>}
+            </div>}
+            {a.success_core&&<div style={{background:"linear-gradient(135deg,#EFF6FF,#F5F0FF)",border:"1px solid #DBEAFE",borderRadius:16,padding:20,marginBottom:12,textAlign:"center"}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>爆款核心</div>
+              <div style={{fontSize:16,fontWeight:800,color:"#2563EB"}}>{a.success_core}</div>
+            </div>}
+          </div>;})()}
+          {hotScripts&&hotScripts.length>0&&<div style={{marginTop:16}}>
+            <div style={{fontSize:16,fontWeight:800,marginBottom:12,color:"var(--t1)"}}>6份优化脚本</div>
+            {hotScripts.map((sc,si)=><div key={si} style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
+                <div style={{fontSize:14,fontWeight:700}}><span style={{background:"#3B82F6",color:"#fff",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:600,marginRight:8}}>方案{si+1}</span>{sc.name}</div>
+                <div style={{display:"flex",gap:6}}><span style={{background:"#EFF6FF",color:"#3B82F6",padding:"2px 8px",borderRadius:4,fontSize:11}}>{sc.type}</span><span style={{background:"#F5F0FF",color:"#7C3AED",padding:"2px 8px",borderRadius:4,fontSize:11}}>{sc.duration}</span></div>
+              </div>
+              {sc.strategy&&<div style={{fontSize:12,color:"var(--t2)",marginBottom:6}}>策略：{sc.strategy}</div>}
+              {sc.emotion_arc&&<div style={{fontSize:12,color:"#7C3AED",marginBottom:10}}>情绪：{sc.emotion_arc}</div>}
+              {sc.shots&&<div style={{borderTop:"1px solid var(--bl)",paddingTop:10}}>
+                {sc.shots.map((sh,shi)=><div key={shi} style={{display:"flex",gap:10,marginBottom:8,fontSize:12,padding:"8px 10px",background:shi%2===0?"var(--s2)":"transparent",borderRadius:8}}>
+                  <div style={{minWidth:36,fontWeight:700,color:"#3B82F6"}}>#{sh.shot||shi+1}</div>
+                  <div style={{minWidth:36,color:"var(--t3)"}}>{sh.dur}</div>
+                  <div style={{flex:1}}><div style={{fontWeight:600,marginBottom:2}}>{sh.copy}</div><div style={{color:"var(--t3)"}}>{sh.scene}</div></div>
+                </div>)}
+              </div>}
+              <button style={{marginTop:8,padding:"8px 16px",border:"1.5px solid #3B82F6",borderRadius:8,background:"#EFF6FF",color:"#3B82F6",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{const txt=`【${sc.name}】\n类型：${sc.type}\n时长：${sc.duration}\n策略：${sc.strategy||""}\n情绪：${sc.emotion_arc||""}\n\n${(sc.shots||[]).map(s=>`[${s.dur}] ${s.copy}\n画面：${s.scene}`).join("\n\n")}`;navigator.clipboard.writeText(txt).then(()=>alert("已复制到剪贴板"));}}>复制此脚本</button>
+            </div>)}
+          </div>}
+          {!hotResult&&!hotBusy&&!hotError&&<div className="tool-empty">
             <div className="tool-empty-ic">📊</div>
             <div className="tool-empty-t">粘贴视频链接，开始拆解爆款密码</div>
             <div className="tool-empty-d">分析结果将在此处展示</div>
-          </div>
+          </div>}
         </div></div>}
 
         {/* 360定位分析 inner page */}
@@ -4602,21 +4949,21 @@ div:hover>.sch-inline-del{opacity:1 !important}
           <div className="tool-form">
             <div className="tool-fg">
               <div className="tool-fg-l">你的主要业务 <span className="rq">*</span></div>
-              <input className="tool-inp" value={posMain} onChange={e=>setPosMain(e.target.value)} placeholder="请输入你的主要业务，例如：美妆护肤、健身私教、咖啡馆等"/>
+              <input className="tool-inp" value={posMain} onChange={e=>setPosMain(e.target.value)} placeholder="请输入你的主要业务，例如：美妆护肤、健身私教、咖啡馆等" disabled={posBusy}/>
             </div>
             <div className="tool-row">
               <div className="tool-fg">
                 <div className="tool-fg-l">所属行业</div>
-                <select className="tool-sel" value={posInd} onChange={e=>setPosInd(e.target.value)}>
+                <select className="tool-sel" value={posInd} onChange={e=>setPosInd(e.target.value)} disabled={posBusy}>
                   <option value="">选择目标行业</option><option>美妆护肤</option><option>食品保健</option><option>数码3C</option><option>教育培训</option><option>服装鞋包</option><option>家居生活</option>
                 </select>
-                <input className="tool-inp" style={{marginTop:6}} placeholder="或输入自定义行业，如：新茶饮"/>
+                <input className="tool-inp" style={{marginTop:6}} placeholder="或输入自定义行业，如：新茶饮" disabled={posBusy}/>
               </div>
               <div className="tool-fg">
                 <div className="tool-fg-l">分析深度 <span className="rq">*</span></div>
                 <div style={{display:"flex",gap:6}}>
                   {[{k:"fast",l:"快速"},{k:"standard",l:"标准版"},{k:"deep",l:"深度"}].map(d=>(
-                    <button key={d.k} className={`tool-hd-tag ${posDepth===d.k?"on":""}`} style={posDepth===d.k?{background:"var(--p)",borderColor:"var(--p)",color:"#fff"}:{}} onClick={()=>setPosDepth(d.k)}>{d.l}</button>
+                    <button key={d.k} className={`tool-hd-tag ${posDepth===d.k?"on":""}`} style={posDepth===d.k?{background:"var(--p)",borderColor:"var(--p)",color:"#fff"}:{}} onClick={()=>setPosDepth(d.k)} disabled={posBusy}>{d.l}</button>
                   ))}
                 </div>
               </div>
@@ -4624,20 +4971,85 @@ div:hover>.sch-inline-del{opacity:1 !important}
             <div className="tool-row">
               <div className="tool-fg">
                 <div className="tool-fg-l">你的抖音主页链接</div>
-                <input className="tool-inp" value={posDouyinLink} onChange={e=>setPosDouyinLink(e.target.value)} placeholder="例如：https://www.douyin.com/user/xxxxxx"/>
+                <input className="tool-inp" value={posDouyinLink} onChange={e=>setPosDouyinLink(e.target.value)} placeholder="例如：https://www.douyin.com/user/xxxxxx" disabled={posBusy}/>
               </div>
             </div>
             <div className="tool-fg">
               <div className="tool-fg-l">竞品抖音链接（选填）</div>
-              <textarea className="tool-inp" rows={3} value={posCompLinks} onChange={e=>setPosCompLinks(e.target.value)} placeholder="可填写1~3个竞品抖音视频或主页链接，每行一个，提供后会增加竞品拆解分析" style={{resize:"vertical"}}/>
+              <textarea className="tool-inp" rows={3} value={posCompLinks} onChange={e=>setPosCompLinks(e.target.value)} placeholder="可填写1~3个竞品抖音视频或主页链接，每行一个" style={{resize:"vertical"}} disabled={posBusy}/>
             </div>
-            <button className="tool-btn purple"><I.Target/> 开始定位分析</button>
+            <button className="tool-btn purple" onClick={runPos360} disabled={posBusy} style={posBusy?{opacity:.7,cursor:"not-allowed"}:{}}>{posBusy?<><span style={{width:14,height:14,border:"2px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%",display:"inline-block",animation:"spin .6s linear infinite"}}/> {posStep}</>:<><I.Target/> 开始定位分析</>}</button>
           </div>
-          <div className="tool-empty">
+          {posError&&<div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:12,padding:"14px 18px",marginTop:16,color:"#DC2626",fontSize:13,fontWeight:500}}>{posError}</div>}
+          {posBusy&&!posResult&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:32,marginTop:16,textAlign:"center"}}><div style={{fontSize:14,fontWeight:600,color:"var(--t1)",marginBottom:8}}>{posStep}</div><div style={{width:200,height:4,background:"var(--s3)",borderRadius:2,margin:"0 auto",overflow:"hidden"}}><div style={{width:"60%",height:"100%",background:"var(--p)",borderRadius:2,animation:"vgShimmer 1.5s infinite linear",backgroundSize:"200% 100%",backgroundImage:"linear-gradient(90deg,var(--p) 25%,var(--pl) 50%,var(--p) 75%)"}}/></div></div>}
+          {posResult&&(()=>{const r=posResult;return<div style={{marginTop:16}}>
+            {r.industry_overview&&<div style={{background:"linear-gradient(135deg,#F5F0FF,#EDE9FE)",border:"1px solid #DDD6FE",borderRadius:16,padding:24,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>行业概览</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+                <div><div style={{fontSize:11,color:"var(--t3)",marginBottom:2}}>市场规模</div><div style={{fontSize:14,fontWeight:700}}>{r.industry_overview.market_size}</div></div>
+                <div><div style={{fontSize:11,color:"var(--t3)",marginBottom:2}}>增长趋势</div><div style={{fontSize:14,fontWeight:700}}>{r.industry_overview.growth_trend}</div></div>
+                <div><div style={{fontSize:11,color:"var(--t3)",marginBottom:2}}>竞争程度</div><div style={{fontSize:14,fontWeight:700}}>{r.industry_overview.competition_level}</div></div>
+                <div><div style={{fontSize:11,color:"var(--t3)",marginBottom:2}}>机会评分</div><div style={{fontSize:20,fontWeight:800,color:"var(--p)"}}>{r.industry_overview.opportunity_score}<span style={{fontSize:12,color:"var(--t3)"}}>/10</span></div></div>
+              </div>
+            </div>}
+            {r.target_audience&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>目标用户</div>
+              <div style={{fontSize:14,fontWeight:700,marginBottom:4}}>{r.target_audience.primary}</div>
+              <div style={{fontSize:12,color:"var(--t2)",marginBottom:8}}>{r.target_audience.demographics}</div>
+              {r.target_audience.pain_points&&<div style={{marginBottom:8}}><div style={{fontSize:11,fontWeight:600,color:"var(--t3)",marginBottom:4}}>用户痛点</div>{r.target_audience.pain_points.map((p,i)=><div key={i} style={{fontSize:12,padding:"4px 0",display:"flex",gap:6,alignItems:"flex-start"}}><span style={{color:"#DC2626",fontWeight:700}}>!</span>{p}</div>)}</div>}
+              {r.target_audience.content_preferences&&<div><div style={{fontSize:11,fontWeight:600,color:"var(--t3)",marginBottom:4}}>内容偏好</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{r.target_audience.content_preferences.map((c,i)=><span key={i} style={{background:"#F5F0FF",color:"var(--p)",padding:"3px 10px",borderRadius:6,fontSize:11,fontWeight:600}}>{c}</span>)}</div></div>}
+            </div>}
+            {r.competitive_landscape&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>竞争格局</div>
+              {r.competitive_landscape.top_players&&r.competitive_landscape.top_players.length>0&&<div style={{marginBottom:12}}><div style={{fontSize:12,fontWeight:600,marginBottom:6}}>头部玩家</div>
+                {r.competitive_landscape.top_players.map((p,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 10px",background:i%2===0?"var(--s2)":"transparent",borderRadius:8,fontSize:12,marginBottom:2}}>
+                  <div><span style={{fontWeight:700}}>{p.name}</span><span style={{color:"var(--t3)",marginLeft:8}}>{p.followers}</span></div>
+                  <div style={{color:"var(--t2)"}}>{p.content_type}</div>
+                </div>)}
+              </div>}
+              {r.competitive_landscape.gaps&&<div style={{marginBottom:8}}><div style={{fontSize:12,fontWeight:600,marginBottom:4}}>竞争空白</div>{r.competitive_landscape.gaps.map((g,i)=><span key={i} style={{background:"#F0FDF4",color:"#16A34A",padding:"3px 10px",borderRadius:6,fontSize:11,fontWeight:600,marginRight:6,display:"inline-block",marginBottom:4}}>{g}</span>)}</div>}
+              {r.competitive_landscape.differentiation_opportunities&&<div><div style={{fontSize:12,fontWeight:600,marginBottom:4}}>差异化机会</div>{r.competitive_landscape.differentiation_opportunities.map((d,i)=><span key={i} style={{background:"#FEF3C7",color:"#B45309",padding:"3px 10px",borderRadius:6,fontSize:11,fontWeight:600,marginRight:6,display:"inline-block",marginBottom:4}}>{d}</span>)}</div>}
+            </div>}
+            {r.positioning_recommendation&&<div style={{background:"linear-gradient(135deg,#EFF6FF,#F5F0FF)",border:"1px solid #DBEAFE",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>定位建议</div>
+              <div style={{fontSize:18,fontWeight:800,color:"var(--p)",marginBottom:12,textAlign:"center",padding:"12px 0"}}>{r.positioning_recommendation.core_positioning}</div>
+              {r.positioning_recommendation.content_pillars&&<div style={{marginBottom:10}}><div style={{fontSize:12,fontWeight:600,marginBottom:6}}>内容支柱</div>{r.positioning_recommendation.content_pillars.map((cp,i)=><div key={i} style={{display:"flex",gap:10,padding:"8px 10px",background:"rgba(255,255,255,.6)",borderRadius:8,marginBottom:4,fontSize:12}}><span style={{fontWeight:700,minWidth:80}}>{cp.pillar}</span><span style={{color:"var(--t2)",flex:1}}>{cp.description}</span><span style={{color:"var(--p)",fontWeight:600,whiteSpace:"nowrap"}}>{cp.frequency}</span></div>)}</div>}
+              <div style={{display:"flex",gap:16,fontSize:12}}>
+                {r.positioning_recommendation.tone_style&&<div><span style={{fontWeight:600}}>调性：</span>{r.positioning_recommendation.tone_style}</div>}
+                {r.positioning_recommendation.visual_identity&&<div><span style={{fontWeight:600}}>视觉：</span>{r.positioning_recommendation.visual_identity}</div>}
+              </div>
+            </div>}
+            {r.content_strategy&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>内容策略</div>
+              {r.content_strategy.hero_content&&<div style={{background:"#FEF3C7",borderRadius:10,padding:"10px 14px",marginBottom:10,fontSize:13}}><span style={{fontWeight:700,color:"#B45309"}}>杀手锏：</span>{r.content_strategy.hero_content}</div>}
+              {r.content_strategy.quick_wins&&<div style={{marginBottom:8}}><div style={{fontSize:12,fontWeight:600,marginBottom:4}}>快速起量方向</div>{r.content_strategy.quick_wins.map((q,i)=><div key={i} style={{fontSize:12,padding:"3px 0",display:"flex",gap:6}}><span style={{color:"#10B981",fontWeight:700}}>+</span>{q}</div>)}</div>}
+              {r.content_strategy.long_term_plays&&<div style={{marginBottom:10}}><div style={{fontSize:12,fontWeight:600,marginBottom:4}}>长期建设</div>{r.content_strategy.long_term_plays.map((l,i)=><div key={i} style={{fontSize:12,padding:"3px 0",display:"flex",gap:6}}><span style={{color:"#3B82F6",fontWeight:700}}>→</span>{l}</div>)}</div>}
+              {r.content_strategy.content_calendar&&r.content_strategy.content_calendar.length>0&&<div><div style={{fontSize:12,fontWeight:600,marginBottom:6}}>内容日历</div>
+                {r.content_strategy.content_calendar.map((w,i)=><div key={i} style={{display:"flex",gap:10,padding:"6px 10px",background:i%2===0?"var(--s2)":"transparent",borderRadius:6,fontSize:12,marginBottom:2}}>
+                  <span style={{fontWeight:700,minWidth:40,color:"var(--p)"}}>{w.week}</span><span style={{flex:1}}>{w.theme}</span><span style={{color:"var(--t3)"}}>{(w.content_types||[]).join("、")}</span><span style={{fontWeight:600}}>{w.count}篇</span>
+                </div>)}
+              </div>}
+            </div>}
+            {r.monetization&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>变现路径</div>
+              <div style={{fontSize:14,fontWeight:700,marginBottom:4}}>{r.monetization.primary_model}</div>
+              {r.monetization.secondary_models&&<div style={{display:"flex",gap:6,marginBottom:6,flexWrap:"wrap"}}>{r.monetization.secondary_models.map((m,i)=><span key={i} style={{background:"#F0FDF4",color:"#16A34A",padding:"2px 10px",borderRadius:6,fontSize:11,fontWeight:600}}>{m}</span>)}</div>}
+              <div style={{fontSize:12,color:"var(--t2)"}}>预计起量周期：{r.monetization.estimated_timeline}</div>
+            </div>}
+            {r.action_plan&&r.action_plan.length>0&&<div style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:16,padding:20,marginBottom:12}}>
+              <div style={{fontSize:11,color:"var(--t3)",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>行动计划</div>
+              {r.action_plan.map((ap,i)=><div key={i} style={{display:"flex",gap:10,padding:"8px 10px",borderRadius:8,marginBottom:4,fontSize:13,background:ap.priority==="P0"?"#FEF2F2":ap.priority==="P1"?"#FEF3C7":"var(--s2)"}}>
+                <span style={{fontWeight:800,fontSize:11,padding:"2px 8px",borderRadius:4,background:ap.priority==="P0"?"#DC2626":ap.priority==="P1"?"#F59E0B":"#71717A",color:"#fff"}}>{ap.priority}</span>
+                <span style={{flex:1,fontWeight:500}}>{ap.action}</span>
+                <span style={{color:"var(--t3)",whiteSpace:"nowrap"}}>{ap.timeline}</span>
+              </div>)}
+            </div>}
+          </div>;})()}
+          {!posResult&&!posBusy&&!posError&&<div className="tool-empty">
             <div className="tool-empty-ic">🎯</div>
             <div className="tool-empty-t">请先填写你的主要业务，选择行业与分析深度</div>
             <div className="tool-empty-d">例如：主要业务"线下皮肤管理工作室" + 行业"美妆/护肤" + 分析深度"标准版"</div>
-          </div>
+          </div>}
         </div></div>}
         {pg==="tmpl"&&<div className="sc">
           <div className="tt" style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -4946,7 +5358,7 @@ div:hover>.sch-inline-del{opacity:1 !important}
         {/* CREATE PAGE */}
         {pg==="create"&&cs!=="storyboard"&&<div className="sw">
           <div className="sl">
-            <div className="sl-hd"><div className="sl-bk" onClick={()=>{activeCreatePg.current=null;setPg("dash");}}><I.ArrowL/> 返回工作台</div><div style={{fontSize:15,fontWeight:700}}>脚本创作</div><button style={{marginLeft:"auto",padding:"4px 10px",borderRadius:6,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontFamily:"inherit"}} onClick={openModal}><I.Plus/> 新创作</button></div>
+            <div className="sl-hd"><div className="sl-bk" onClick={()=>{if(!isCreating)activeCreatePg.current=null;setPg("dash");}}><I.ArrowL/> 返回工作台</div><div style={{fontSize:15,fontWeight:700}}>脚本创作</div><button style={{marginLeft:"auto",padding:"4px 10px",borderRadius:6,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontFamily:"inherit"}} onClick={openModal}><I.Plus/> 新创作</button></div>
             <div className="sl-sec"><div className="sl-lb">产品</div><div className="sl-vl">{prod}</div></div>
             <div className="sl-sec"><div className="sl-lb">品类</div><div className="sl-tag">{cat}</div></div>
             <div className="sl-sec"><div className="sl-lb">时长</div><div className="sl-vl">{dur}</div></div>
@@ -5017,7 +5429,7 @@ div:hover>.sch-inline-del{opacity:1 !important}
                   <button className="abi"><I.Copy/> 复制全文</button>
                   <button className="abi"><I.Download/> 导出PDF</button>
                   <button className="abi"><I.Refresh/> 重新生成</button>
-                  <button className="abi pr" onClick={()=>{if(avatarOn&&adopted?._avatarData){generateAvatarVideo();}else{setCs("shots");}}}>采纳此方案</button>
+                  <button className="abi pr" onClick={()=>{if(avatarOn&&adopted?._avatarData){generateAvatarImages();}else{setCs("shots");}}}>采纳此方案</button>
                 </div>
               </div></div>
             </>;})()}
@@ -5153,25 +5565,89 @@ div:hover>.sch-inline-del{opacity:1 !important}
           </div></div>})()}
         </div>}
 
+        {/* AVATAR IMAGE PREVIEW — 选择首帧 */}
+        {pg==="create"&&cs==="avatar-preview"&&<div className="sb-pg">
+          <div className="sb-steps">
+            {[{l:"产品信息",s:"done"},{l:"生成脚本",s:"done"},{l:"选择脚本",s:"done"},{l:"图片预览",s:"on"},{l:"视频生成",s:""},{l:"完成",s:""}].map((st,i)=>
+              <span key={i} style={{display:"inline-flex",alignItems:"center",gap:4}}>{i>0&&<span className="sb-sep">›</span>}<span className={`sb-step ${st.s}`}><span className="sb-step-dot">{st.s==="done"?<I.Check/>:""}</span>{st.l}</span></span>
+            )}
+          </div>
+          <div style={{maxWidth:860,margin:"0 auto",padding:"24px 0"}}>
+            <div style={{fontSize:18,fontWeight:700,marginBottom:6}}>数字人展示图预览</div>
+            <div style={{fontSize:12,color:"var(--t2)",marginBottom:16,lineHeight:1.6}}>
+              场景：{adopted?._avatarData?.avatarSel?.nm} 手持 {adopted?._avatarData?.prod} 对镜头口播展示。请选择一张作为视频首帧。
+            </div>
+            <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap"}}>
+              {avatarPreviewImgs.map((url,i)=>(
+                <div key={i} onClick={()=>setAvatarSelIdx(i)} style={{
+                  width:220,cursor:"pointer",borderRadius:12,overflow:"hidden",
+                  border:avatarSelIdx===i?"3px solid var(--p)":"3px solid var(--bl)",
+                  boxShadow:avatarSelIdx===i?"0 0 0 2px var(--pbg)":"none",
+                  transition:"all .2s",position:"relative",
+                }}>
+                  <img src={url} alt={`展示图${i+1}`} style={{width:"100%",display:"block"}}/>
+                  {avatarSelIdx===i&&<div style={{
+                    position:"absolute",top:8,right:8,width:24,height:24,borderRadius:"50%",
+                    background:"var(--p)",display:"flex",alignItems:"center",justifyContent:"center",
+                  }}><I.Check/></div>}
+                </div>
+              ))}
+            </div>
+            {avatarCleanProdImg&&<>
+              <div style={{fontSize:15,fontWeight:700,marginBottom:8}}>产品精修图</div>
+              <div style={{display:"flex",gap:12,marginBottom:24}}>
+                <div style={{width:100,height:100,borderRadius:10,overflow:"hidden",border:"1px solid var(--bl)"}}>
+                  <img src={avatarCleanProdImg} alt="产品精修图" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                </div>
+              </div>
+            </>}
+            {adopted?._avatarData?.script&&<>
+              <div style={{fontSize:15,fontWeight:700,marginBottom:8}}>口播文案</div>
+              <div style={{fontSize:13,color:"var(--t2)",lineHeight:1.8,padding:"14px 18px",background:"var(--s)",borderRadius:"var(--rl)",border:"1px solid var(--bl)",marginBottom:24,whiteSpace:"pre-wrap"}}>{adopted._avatarData.script}</div>
+            </>}
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+              <button style={{padding:"8px 18px",borderRadius:10,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:13,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:5,fontFamily:"inherit"}} onClick={()=>setCs("detail")}><I.ArrowL/> 返回修改脚本</button>
+              <button style={{padding:"8px 18px",borderRadius:10,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:13,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",gap:5,fontFamily:"inherit"}} onClick={()=>generateAvatarImages()}><I.Refresh/> 重新生成图片</button>
+              <button style={{padding:"9px 24px",borderRadius:10,border:"none",background:"var(--p)",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>confirmAvatarVideo()}>确认生成视频</button>
+            </div>
+          </div>
+        </div>}
+
         {/* VIDEO GENERATING */}
         {pg==="create"&&cs==="generating"&&<div className="sb-pg">
           <div className="sb-steps">
-            {[{l:"产品信息",s:"done"},{l:"生成脚本",s:"done"},{l:"选择脚本",s:"done"},{l:"脚本打磨",s:"done"},{l:"分镜预览",s:"done"},{l:"视频生成",s:"on"},{l:"完成",s:""}].map((st,i)=>
+            {(adopted?._avatarData
+              ? (avatarPreviewImgs.length===0
+                ? [{l:"产品信息",s:"done"},{l:"生成脚本",s:"done"},{l:"选择脚本",s:"done"},{l:"图片预览",s:"on"},{l:"视频生成",s:""},{l:"完成",s:""}]
+                : [{l:"产品信息",s:"done"},{l:"生成脚本",s:"done"},{l:"选择脚本",s:"done"},{l:"图片预览",s:"done"},{l:"视频生成",s:"on"},{l:"完成",s:""}])
+              :[{l:"产品信息",s:"done"},{l:"生成脚本",s:"done"},{l:"选择脚本",s:"done"},{l:"脚本打磨",s:"done"},{l:"分镜预览",s:"done"},{l:"视频生成",s:"on"},{l:"完成",s:""}]
+            ).map((st,i)=>
               <span key={i} style={{display:"inline-flex",alignItems:"center",gap:4}}>{i>0&&<span className="sb-sep">›</span>}<span className={`sb-step ${st.s}`}><span className="sb-step-dot">{st.s==="done"?<I.Check/>:""}</span>{st.l}</span></span>
             )}
           </div>
           <div className="vg-wrap">
             <div className="vg-card">
-              <div className="vg-t">视频生成中...</div>
-              <div className="vg-bar-wrap"><div className="vg-bar"><div className="vg-bar-fill" style={{width:vgPct+"%"}}/></div><div className="vg-pct">{vgPct}%</div></div>
-              <div className="vg-sub">{sbGenStatus||`视频片段 ${Math.min(Math.round(vgPct/100*sbShots.length),sbShots.length)}/${sbShots.length} 完成`}</div>
-              <div style={{fontSize:11,color:"var(--t3)",marginTop:4}}>已用时 {sbElapsed}秒 · 配音: {VOICES.find(v=>v.id===sbVoice)?.name||"晓晓"}</div>
-              <div className="vg-timeline">
-                <div className={`vg-tl-item ${vgStep>=1?"done":vgStep===0?"on":""}`}>TTS配音生成</div>
-                <div className={`vg-tl-item ${vgStep>=2?"done":vgStep===1?"on":""}`}>上传素材</div>
-                <div className={`vg-tl-item ${vgStep>=3?"done":vgStep===2?"on":""}`}>生成视频片段</div>
-                <div className={`vg-tl-item ${vgStep>=4?"done":vgStep===3?"on":""}`}>合成&完成</div>
-              </div>
+              {adopted?._avatarData&&avatarPreviewImgs.length===0?<>
+                <div className="vg-t">图片生成中...</div>
+                <div className="vg-bar-wrap"><div className="vg-bar"><div className="vg-bar-fill" style={{width:vgPct+"%"}}/></div><div className="vg-pct">{vgPct}%</div></div>
+                <div className="vg-sub">{sbGenStatus||"正在生成展示图..."}</div>
+                <div style={{fontSize:11,color:"var(--t3)",marginTop:4}}>已用时 {sbElapsed}秒</div>
+                <div className="vg-timeline">
+                  <div className={`vg-tl-item ${vgPct>=25?"done":"on"}`}>产品精修图</div>
+                  <div className={`vg-tl-item ${vgPct>=100?"done":vgPct>=25?"on":""}`}>数字人展示图</div>
+                </div>
+              </>:<>
+                <div className="vg-t">视频生成中...</div>
+                <div className="vg-bar-wrap"><div className="vg-bar"><div className="vg-bar-fill" style={{width:vgPct+"%"}}/></div><div className="vg-pct">{vgPct}%</div></div>
+                <div className="vg-sub">{sbGenStatus||`视频片段 ${Math.min(Math.round(vgPct/100*sbShots.length),sbShots.length)}/${sbShots.length} 完成`}</div>
+                <div style={{fontSize:11,color:"var(--t3)",marginTop:4}}>已用时 {sbElapsed}秒 · 配音: {VOICES.find(v=>v.id===sbVoice)?.name||"晓晓"}</div>
+                <div className="vg-timeline">
+                  <div className={`vg-tl-item ${vgStep>=1?"done":vgStep===0?"on":""}`}>TTS配音生成</div>
+                  <div className={`vg-tl-item ${vgStep>=2?"done":vgStep===1?"on":""}`}>上传素材</div>
+                  <div className={`vg-tl-item ${vgStep>=3?"done":vgStep===2?"on":""}`}>生成视频片段</div>
+                  <div className={`vg-tl-item ${vgStep>=4?"done":vgStep===3?"on":""}`}>合成&完成</div>
+                </div>
+              </>}
             </div>
           </div>
         </div>}
@@ -5179,7 +5655,10 @@ div:hover>.sch-inline-del{opacity:1 !important}
         {/* VIDEO PREVIEW */}
         {pg==="create"&&cs==="preview"&&<div className="sb-pg">
           <div className="sb-steps">
-            {[{l:"产品信息",s:"done"},{l:"生成脚本",s:"done"},{l:"选择脚本",s:"done"},{l:"脚本打磨",s:"done"},{l:"分镜预览",s:"done"},{l:"视频生成",s:"done"},{l:"完成",s:"on"}].map((st,i)=>
+            {(adopted?._avatarData
+              ?[{l:"产品信息",s:"done"},{l:"生成脚本",s:"done"},{l:"选择脚本",s:"done"},{l:"图片预览",s:"done"},{l:"视频生成",s:"done"},{l:"完成",s:"on"}]
+              :[{l:"产品信息",s:"done"},{l:"生成脚本",s:"done"},{l:"选择脚本",s:"done"},{l:"脚本打磨",s:"done"},{l:"分镜预览",s:"done"},{l:"视频生成",s:"done"},{l:"完成",s:"on"}]
+            ).map((st,i)=>
               <span key={i} style={{display:"inline-flex",alignItems:"center",gap:4}}>{i>0&&<span className="sb-sep">›</span>}<span className={`sb-step ${st.s}`}><span className="sb-step-dot">{st.s==="done"?<I.Check/>:""}</span>{st.l}</span></span>
             )}
           </div>
@@ -5204,13 +5683,13 @@ div:hover>.sch-inline-del{opacity:1 !important}
         {/* DEEP CHAT CREATE */}
         {pg==="create-deep"&&<div className="sw">
           <div className="sl">
-            <div className="sl-hd"><div className="sl-bk" onClick={()=>{activeCreatePg.current=null;setPg("dash");}}><I.ArrowL/> 返回工作台</div><button style={{marginLeft:"auto",padding:"4px 10px",borderRadius:6,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontFamily:"inherit"}} onClick={openModal}><I.Plus/> 新创作</button></div>
+            <div className="sl-hd"><div className="sl-bk" onClick={()=>{if(!isCreating)activeCreatePg.current=null;setPg("dash");}}><I.ArrowL/> 返回工作台</div><button style={{marginLeft:"auto",padding:"4px 10px",borderRadius:6,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:3,fontFamily:"inherit"}} onClick={openModal}><I.Plus/> 新创作</button></div>
             <div className="dp-hd">
               <div className="dp-hd-t"><I.Bot/> AI 创作顾问</div>
               <div className="dp-hd-d">对话式深度挖掘你的创作需求</div>
             </div>
             <div className="dp-sec-t">快捷指令</div>
-            {[{icon:<I.Bulb/>,t:"帮我找灵感",d:"从热搜挖掘创意角度"},{icon:<I.Search/>,t:"搜索爆款视频",d:"搜索同类高播放内容"},{icon:<I.Link/>,t:"分析竞品链接",d:"拆解竞品脚本结构"}].map((c,i)=>
+            {[{icon:<I.Bulb/>,t:"帮我找灵感",d:"并行搜索多数据源挖掘角度"},{icon:<I.Search/>,t:"搜索爆款视频",d:"按爆款类型筛选抖音视频"},{icon:<I.Search/>,t:"搜小红书",d:"搜索同类小红书笔记"},{icon:<I.Link/>,t:"分析竞品链接",d:"拆解竞品脚本结构"}].map((c,i)=>
               <div key={i} className="dp-card" onClick={()=>send(c.t)}><div className="dp-ic">{c.icon}</div><div><div className="dp-t">{c.t}</div><div className="dp-d">{c.d}</div></div></div>
             )}
           </div>
@@ -5218,13 +5697,16 @@ div:hover>.sch-inline-del{opacity:1 !important}
             <div className="cc">
               <div className="cmsg" ref={chatRef}>
                 {msgs.length<=1&&<div className="chat-welcome"><div className="chat-welcome-ic"><I.Bot/></div><div className="chat-welcome-t">你好，我是你的AI创作顾问</div><div className="chat-welcome-d">告诉我你想创作什么内容，或者选择左侧快捷指令开始</div></div>}
-                {msgs.map((m,i)=><div key={i} className={`mg ${m.r==="user"?"u":"bot"} fn`}><div className={`ma ${m.r==="user"?"usr":"bot"}`}>{m.r==="user"?"你":<I.Bot/>}</div><div><div className="mbu"><div style={{whiteSpace:"pre-wrap"}}>{m.c}</div>
-                {m.acts&&<div className="qab">{m.acts.map((a,j)=><button key={j} className="qa" onClick={()=>send(a)}>{a}</button>)}</div>}
-                {m.hots&&<><div style={{margin:"10px 0"}}>{m.hots.map((h,j)=><div key={j} className="hi2"><span>{h.t}</span><span className="hi2c">{h.ct}</span></div>)}</div>
-                  <div style={{fontSize:12,fontWeight:700,margin:"10px 0 6px"}}>推荐灵感角度</div>
-                  <div className="acs">{m.angs.map((a,j)=><div key={j} className="ac"><div className="ac-t">{a.ic} {a.t}</div><div className="ac-s">{a.s}</div><div className="ac-d">{a.d}</div></div>)}</div>
-                  <div style={{fontSize:11,color:"var(--t2)",lineHeight:1.7,marginTop:10,padding:"10px 14px",background:"var(--s2)",borderRadius:10,border:"1px solid var(--bl)"}}>{m.sum}</div>
-                </>}</div></div></div>)}
+                {msgs.map((m,i)=><div key={i} className={`mg ${m.r==="user"?"u":"bot"} fn`}><div className={`ma ${m.r==="user"?"usr":"bot"}`}>{m.r==="user"?"你":<I.Bot/>}</div><div style={{maxWidth:"85%",minWidth:0}}><div className={"mbu"+(m.typing?" typing-dots":"")}><div style={{whiteSpace:"pre-wrap"}}>{m.c}</div>
+                {m.acts&&<div className="qab" style={{marginTop:10}}>{m.acts.map((a,j)=><button key={j} className="qa" onClick={()=>send(a)}>{a}</button>)}</div>}
+                {m.viralTypes&&<div style={{marginTop:12}}><div style={{display:"grid",gap:8}}>{m.viralTypes.map((vt,j)=><div key={j} style={{padding:"12px 16px",background:"var(--s2)",borderRadius:10,border:"1.5px solid var(--bl)",cursor:"pointer",transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--pl)";e.currentTarget.style.background="var(--pbg)";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--bl)";e.currentTarget.style.background="var(--s2)";}} onClick={()=>{setCi("搜视频 ");document.querySelector(".cin")?.focus();setMsgs(prev=>[...prev,{r:"bot",c:"好的，选择了「"+vt.name+"」模式！\n\n请在输入框输入你想搜的产品/行业关键词，比如：\n• 搜视频 面膜 "+vt.name.replace(/[^一-鿿]/g,"")+"\n• 搜视频 宠物用品 "+vt.name.replace(/[^一-鿿]/g,"")}]);}}><div style={{fontSize:13,fontWeight:700,color:"var(--t1)",marginBottom:3}}>{vt.name}</div><div style={{fontSize:11,color:"var(--t3)",lineHeight:1.5}}>{vt.desc}</div></div>)}</div></div>}
+                {m.videos&&<div style={{marginTop:12}}><div style={{fontSize:11,fontWeight:700,color:"var(--t3)",marginBottom:8}}>🎬 {m.viralLabel||"抖音视频"} · {m.videos.length}条 <span style={{fontWeight:400,fontSize:10}}>（点击可观看）</span></div>{m.videos.map((v,j)=><div key={j} style={{display:"flex",gap:10,padding:"10px 14px",background:"var(--s2)",borderRadius:10,marginBottom:6,border:"1px solid var(--bl)",cursor:"pointer",transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--pl)";e.currentTarget.style.background="var(--pbg)";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--bl)";e.currentTarget.style.background="var(--s2)";}} onClick={()=>{const url=v.video_url||("https://www.douyin.com/video/"+(v.video_id||""));window.open(url,"_blank");}}>{v.cover_url&&<div style={{width:60,height:80,borderRadius:6,overflow:"hidden",flexShrink:0,background:"#000",position:"relative"}}><img src={v.cover_url} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none"}}/><div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:20,height:20,borderRadius:10,background:"rgba(255,255,255,.8)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10}}>▶</div></div>}<div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:600,color:"var(--t1)",lineHeight:1.5,marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{(v.description||"").slice(0,80)}</div><div style={{display:"flex",gap:8,fontSize:10,color:"var(--t3)",flexWrap:"wrap",alignItems:"center"}}>{v.viral_tag&&<span style={{background:"linear-gradient(135deg,#FF6B6B,#EE5A24)",color:"#fff",padding:"2px 8px",borderRadius:10,fontWeight:700,fontSize:9}}>{v.viral_tag}</span>}<span>❤️ {(v.digg_count||0).toLocaleString()}</span><span>💬 {(v.comment_count||0).toLocaleString()}</span><span>▶️ {(v.play_count||0).toLocaleString()}</span>{v.duration?<span>⏱ {Math.round(v.duration/1000)}s</span>:null}</div></div></div>)}</div>}
+                {m.notes&&<div style={{marginTop:12}}><div style={{fontSize:11,fontWeight:700,color:"var(--t3)",marginBottom:8}}>📕 小红书笔记 · {m.notes.length}条</div>{m.notes.map((n,j)=><div key={j} style={{padding:"10px 14px",background:"#FFF5F5",borderRadius:10,marginBottom:6,border:"1px solid #FED7D7"}}><div style={{fontSize:12,fontWeight:600,color:"var(--t1)",lineHeight:1.5,marginBottom:4}}>{n.title||""}</div><div style={{display:"flex",gap:12,fontSize:10,color:"var(--t3)"}}><span>❤️ {n.liked_count||0}</span><span>👤 {n.author||""}</span><span style={{background:"#FED7D7",color:"#E53E3E",padding:"1px 6px",borderRadius:4,fontWeight:600}}>{n.type==="video"?"视频":"图文"}</span></div></div>)}</div>}
+                {m.webResults&&<div style={{marginTop:12}}><div style={{fontSize:11,fontWeight:700,color:"var(--t3)",marginBottom:8}}>🌐 网络搜索</div>{m.webResults.map((w,j)=><div key={j} style={{padding:"10px 14px",background:"#F0FFF4",borderRadius:10,marginBottom:6,border:"1px solid #C6F6D5"}}><div style={{fontSize:12,fontWeight:600,color:"var(--t1)",marginBottom:3}}>{(w.title||"").slice(0,60)}</div><div style={{fontSize:10,color:"var(--t3)",lineHeight:1.5}}>{(w.content||"").slice(0,120)}</div></div>)}</div>}
+                {m.hots&&<div style={{marginTop:12}}><div style={{fontSize:11,fontWeight:700,color:"var(--t3)",marginBottom:8}}>🔥 营销灵感热点</div><div style={{display:"grid",gap:4}}>{m.hots.map((h,j)=><div key={j} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:j<3?"linear-gradient(135deg,#FFF5F5,#FED7D7)":"var(--s2)",borderRadius:8,border:"1px solid "+(j<3?"#FEB2B2":"var(--bl)"),cursor:"pointer",transition:"all .15s"}} onMouseEnter={e=>e.currentTarget.style.transform="translateX(3px)"} onMouseLeave={e=>e.currentTarget.style.transform="none"} onClick={()=>send("搜视频 "+h.t)}><span style={{width:20,height:20,borderRadius:6,background:j===0?"#E53E3E":j===1?"#ED8936":j===2?"#ECC94B":"var(--s3)",color:j<3?"#fff":"var(--t3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,flexShrink:0}}>{j+1}</span><div style={{flex:1,minWidth:0}}><span style={{fontSize:12,fontWeight:j<3?700:500,color:j<3?"var(--t1)":"var(--t2)"}}>{h.t}</span>{h.ma&&<div style={{fontSize:10,color:"var(--p)",marginTop:2,fontWeight:500}}>💡 {h.ma}</div>}</div><span style={{fontSize:10,color:"var(--t3)",flexShrink:0}}>{h.ct}</span></div>)}</div></div>}
+                {m.angs&&<div style={{marginTop:12}}><div style={{fontSize:11,fontWeight:700,color:"var(--t3)",marginBottom:8}}>💡 推荐灵感角度</div><div style={{display:"grid",gap:8}}>{m.angs.map((a,j)=><div key={j} style={{padding:"14px 16px",background:"linear-gradient(135deg,var(--pbg),#EDE9FE)",borderRadius:12,border:"1.5px solid #DDD6FE",cursor:"pointer",transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 4px 12px rgba(124,58,237,.12)";}} onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}} onClick={()=>send(a.t+"方向，帮我深入分析")}><div style={{fontSize:13,fontWeight:700,color:"var(--pd)",marginBottom:4}}>{a.ic} {a.t}</div><div style={{fontSize:10,color:"var(--p)",marginBottom:6,fontWeight:600}}>{a.s}</div><div style={{fontSize:11,color:"var(--t2)",lineHeight:1.6}}>{a.d}</div></div>)}</div>
+                  {m.sum&&<div style={{fontSize:10,color:"var(--t3)",lineHeight:1.6,marginTop:8,padding:"8px 12px",background:"var(--s2)",borderRadius:8,borderLeft:"3px solid var(--pl)"}}>{m.sum}</div>}
+                </div>}</div></div></div>)}
               </div>
               <div className="cbr"><input className="cin" placeholder="聊聊你的创意想法..." value={ci} onChange={e=>setCi(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send(ci)}}/><button className="cmb"><I.Mic/></button><button className="csb" onClick={()=>send(ci)}><I.Send/></button></div>
               {msgs.length>2&&<button className="cgb" onClick={async()=>{
@@ -5244,7 +5726,7 @@ div:hover>.sch-inline-del{opacity:1 !important}
                   const rawResults=await Promise.all(ol.map(o=>sideExpandOne(o)));
                   const results=rawResults.filter(r=>r?.table?.length>0);
                   if(!results.length)throw new Error("所有方案生成失败");
-                  setAiScripts(results.map((s,i)=>({...s,id:i+1,badges:s.badges||[],logic:s.logic||[],table:s.table||[],name:s.name||`方案${i+1}`,dur:s.dur||d,shots:s.shots||0,sell:s.sell||0,desc:s.desc||""})));setCs("results");
+                  const deepScripts=results.map((s,i)=>({...s,id:i+1,badges:s.badges||[],logic:s.logic||[],table:s.table||[],name:s.name||`方案${i+1}`,dur:s.dur||d,shots:s.shots||0,sell:s.sell||0,desc:s.desc||""}));setAiScripts(deepScripts);saveToHistory(deepScripts,{prod:p,cat:c,dur:d,mode:"deep"});setCs("results");
                 }catch(e){console.error("[侧边栏AI生成失败]",e);setAiScripts([]);setCs("results");setTimeout(()=>alert("AI脚本生成失败："+e.message+"\n\n当前显示的是内置示例脚本。"),300);}
               }}><I.Zap/> 根据对话生成脚本</button>}
             </div>

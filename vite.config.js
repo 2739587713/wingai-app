@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { spawn } from 'child_process'
+import { spawn, execSync } from 'child_process'
 import { readFile, writeFile, unlink, mkdir, readdir, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -96,6 +96,39 @@ function urlExpandPlugin() {
           console.log('[expand-url] error:', e.message)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ url: target, error: e.message }))
+        }
+      })
+    }
+  }
+}
+
+/* ═══ Proxy Download plugin (bypass CORS for browser-side video compose) ═══ */
+function proxyDownloadPlugin() {
+  return {
+    name: 'proxy-download',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        if (!req.url.startsWith('/proxy-download')) return next()
+        const u = new URL(req.url, 'http://localhost')
+        const target = u.searchParams.get('url')
+        if (!target) { res.writeHead(400); res.end('missing url'); return }
+        console.log('[proxy-download]', target.slice(0, 100))
+        try {
+          const resp = await fetch(target, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            signal: AbortSignal.timeout(120000),
+          })
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+          const buf = Buffer.from(await resp.arrayBuffer())
+          res.writeHead(200, {
+            'Content-Type': resp.headers.get('content-type') || 'video/mp4',
+            'Content-Length': buf.length,
+          })
+          res.end(buf)
+        } catch (e) {
+          console.error('[proxy-download] error:', e.message)
+          res.writeHead(500)
+          res.end(e.message)
         }
       })
     }
@@ -290,7 +323,7 @@ function videoComposePlugin() {
     'C:/Users/Lenovo/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.0.1-full_build/bin/ffmpeg.exe',
   ]
   function getFFmpegBin() {
-    for (const p of FFMPEG_PATHS) { try { require('child_process').execSync(p + ' -version', { stdio: 'ignore' }); console.log('[compose-video] Found ffmpeg at:', p); return p } catch {} }
+    for (const p of FFMPEG_PATHS) { try { execSync(`"${p}" -version`, { stdio: 'ignore' }); console.log('[compose-video] Found ffmpeg at:', p); return p } catch {} }
     console.log('[compose-video] WARNING: ffmpeg not found in any path!')
     return 'ffmpeg'
   }
@@ -380,7 +413,7 @@ delete process.env.HTTPS_PROXY
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), urlExpandPlugin(), edgeTTSPlugin(), videoComposePlugin()],
+  plugins: [react(), urlExpandPlugin(), proxyDownloadPlugin(), edgeTTSPlugin(), videoComposePlugin()],
   server: {
     proxy: {
       '/api-proxy': {

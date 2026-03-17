@@ -133,15 +133,30 @@ class TikHubClient:
                     if tag.get("hashtag_name"):
                         hashtags.append(tag["hashtag_name"])
 
+                # 提取封面图
+                cover_url = ""
+                video_info = aweme.get("video", {})
+                if isinstance(video_info, dict):
+                    for cover_key in ("origin_cover", "cover", "dynamic_cover"):
+                        cover_obj = video_info.get(cover_key, {})
+                        if isinstance(cover_obj, dict):
+                            urls = cover_obj.get("url_list", [])
+                            if urls:
+                                cover_url = urls[0]
+                                break
+
+                vid = aweme.get("aweme_id", "")
                 videos.append({
-                    "video_id": aweme.get("aweme_id", ""),
+                    "video_id": vid,
                     "description": desc,
                     "play_count": statistics.get("play_count", 0),
                     "digg_count": statistics.get("digg_count", 0),
                     "comment_count": statistics.get("comment_count", 0),
                     "share_count": statistics.get("share_count", 0),
                     "duration": aweme.get("duration", 0),
-                    "hashtags": hashtags
+                    "hashtags": hashtags,
+                    "cover_url": cover_url,
+                    "video_url": f"https://www.douyin.com/video/{vid}" if vid else "",
                 })
         except Exception as e:
             logger.error(f"解析TikHub搜索结果失败: {e}")

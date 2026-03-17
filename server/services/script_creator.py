@@ -3083,6 +3083,10 @@ DNA重组规则:
         if any(kw in msg for kw in ["搜一搜", "查一下", "搜网上", "最新消息", "行业报告"]):
             return "search_web"
 
+        # 找灵感（并行多数据源）
+        if any(kw in msg for kw in ["找灵感", "灵感", "创意角度", "帮我找", "给我灵感"]):
+            return "get_inspiration"
+
         return None
 
     async def _execute_deep_tool(self, tool: str, message: str, session: Dict) -> Dict:
@@ -3090,22 +3094,100 @@ DNA重组规则:
         import re
 
         # 从消息中提取关键词
-        keyword = re.sub(r"(帮我|请|搜|一下|搜索|找|分析|拆解|查|看看)", "", message).strip()
+        keyword = re.sub(r"(帮我|请|搜|一下|搜索|找|分析|拆解|查|看看|爆款|视频|方向)", "", message).strip()
         if not keyword:
             keyword = session.get("product_name", "")
 
         try:
             if tool == "search_douyin":
-                videos = await self.tikhub.search_videos(keyword, count=10, sort_type=1)
-                top_videos = videos[:5]
-                summary_parts = [f"找到{len(videos)}个相关抖音视频:"]
-                for v in top_videos:
-                    desc = v.get("description", "")[:50]
-                    summary_parts.append(f"  · {desc}")
+                # 判断是否有实际搜索关键词（去掉指令词后是否为空）
+                generic_words = {"爆款视频", "视频", "抖音", "爆款", "抖音热点", "同类", "高播放", "内容", ""}
+                real_keyword = keyword.strip()
+                if real_keyword in generic_words or len(real_keyword) < 2:
+                    # 没有实际关键词 → 引导用户提供
+                    return {
+                        "tool": "search_douyin",
+                        "summary": "我来帮你搜爆款视频！先告诉我：\n\n"
+                                   "1️⃣ 你想搜什么？（产品名/行业/关键词，如：面膜、宠物用品、健身）\n\n"
+                                   "2️⃣ 你想看哪种爆款？",
+                        "data": {
+                            "need_input": True,
+                            "viral_types": [
+                                {"id": "low_fan", "name": "🔥 低粉爆款", "desc": "粉丝<1万但播放量超10万，内容本身有爆发力，最适合新号对标学习"},
+                                {"id": "recent_hot", "name": "📈 近期火爆", "desc": "最近发布且快速起量，反映当下用户兴趣热点"},
+                                {"id": "high_engage", "name": "💬 高互动", "desc": "评论/收藏异常高，说明内容引发了强烈共鸣或争议"},
+                                {"id": "top_like", "name": "❤️ 点赞之王", "desc": "纯点赞量排序，行业内影响力最大的内容"},
+                            ],
+                        },
+                    }
+
+                # 识别爆款类型
+                viral_type = "top_like"  # 默认: 点赞最高
+                if any(kw in message for kw in ["低粉", "小号", "新号", "素人"]):
+                    viral_type = "low_fan"
+                elif any(kw in message for kw in ["近期", "最新", "最近", "这几天", "本周"]):
+                    viral_type = "recent_hot"
+                elif any(kw in message for kw in ["互动", "评论", "收藏", "转发", "讨论"]):
+                    viral_type = "high_engage"
+
+                # 根据类型选择排序方式
+                sort_type = 1  # 默认按点赞排序
+                count = 20
+                if viral_type == "recent_hot":
+                    sort_type = 2  # 按最新排序
+
+                videos = await self.tikhub.search_videos(real_keyword, count=count, sort_type=sort_type)
+
+                # 根据爆款类型二次筛选
+                type_label = "点赞之王"
+                if viral_type == "low_fan":
+                    type_label = "低粉爆款"
+                    # 低粉爆款: 播放量>10万 且 互动率高
+                    scored = []
+                    for v in videos:
+                        plays = v.get("play_count", 0) or 0
+                        likes = v.get("digg_count", 0) or 0
+                        comments = v.get("comment_count", 0) or 0
+                        if plays < 100000:
+                            continue
+                        engage_rate = round((likes + comments * 3) / max(plays, 1) * 100, 2)
+                        v["engage_rate"] = engage_rate
+                        v["viral_tag"] = f"互动率{engage_rate}%"
+                        scored.append(v)
+                    scored.sort(key=lambda v: v.get("engage_rate", 0), reverse=True)
+                    videos = scored if scored else videos
+                elif viral_type == "recent_hot":
+                    type_label = "近期火爆"
+                    # 按播放量筛选近期视频
+                    for v in videos:
+                        plays = v.get("play_count", 0) or 0
+                        v["viral_tag"] = f"播放{plays//10000}万" if plays >= 10000 else f"播放{plays}"
+                    videos.sort(key=lambda v: v.get("play_count", 0), reverse=True)
+                elif viral_type == "high_engage":
+                    type_label = "高互动"
+                    for v in videos:
+                        comments = v.get("comment_count", 0) or 0
+                        shares = v.get("share_count", 0) or 0
+                        v["viral_tag"] = f"评论{comments} 转发{shares}"
+                    videos.sort(key=lambda v: (v.get("comment_count", 0) + v.get("share_count", 0) * 2), reverse=True)
+                else:
+                    type_label = "点赞之王"
+                    for v in videos:
+                        likes = v.get("digg_count", 0) or 0
+                        v["viral_tag"] = f"点赞{likes//10000}万" if likes >= 10000 else f"点赞{likes}"
+
+                top_videos = videos[:8]
+                summary = f"为「{real_keyword}」找到{len(top_videos)}条{type_label}视频："
                 return {
                     "tool": "search_douyin",
-                    "summary": "\n".join(summary_parts),
-                    "data": {"videos": top_videos, "keyword": keyword, "total": len(videos)},
+                    "summary": summary,
+                    "data": {
+                        "videos": top_videos,
+                        "keyword": real_keyword,
+                        "viral_type": viral_type,
+                        "viral_label": type_label,
+                        "total": len(videos),
+                    },
                 }
 
             elif tool == "search_xiaohongshu":
@@ -3125,51 +3207,76 @@ DNA重组规则:
                 topics = await self.tikhub.get_hot_topics()
                 deep_ctx = session.get("deep_context", {})
                 product = session.get("product_name", "")
-                if not product:
-                    skip_kw = ("找抖音热点", "找热点", "热搜", "帮我找", "搜一下", "搜索")
-                    for m in deep_ctx.get("messages", [])[::-1]:
-                        if m.get("role") != "user":
-                            continue
-                        c = m.get("content", "").strip()
-                        if len(c) < 4 or any(kw in c for kw in skip_kw):
-                            continue
-                        product = c[:30]
-                        break
-                # 根据产品关键词筛选相关热搜：有产品时用 AI 从全量热搜中选出最相关的 Top10
-                if product and product.strip():
-                    top10 = await self._filter_hot_topics_by_product(topics, product)
-                else:
-                    top10 = topics[:10]
+
+                # 取全量热搜标题给 AI，让 AI 筛选出营销相关的热点
+                topics_text = "\n".join(
+                    f"{i+1}. {t.get('title', '')} (热度:{t.get('hot_value', '')})"
+                    for i, t in enumerate(topics[:30])
+                )
 
                 conv_text = "\n".join(
                     f"{'用户' if m['role'] == 'user' else 'AI'}: {m['content']}"
-                    for m in deep_ctx.get("messages", [])[-8:]
+                    for m in deep_ctx.get("messages", [])[-6:]
                 )
-                topics_text = "\n".join(f"{t.get('position', '')}. {t.get('title', '')}" for t in top10)
-                # AI 只生成开场和相关性说明，完整列表由我们拼接，确保白色框内显示全部10条
-                prompt = f"""你是短视频创意顾问。用户正在与你讨论创作内容。
 
-对话上下文:
+                prompt = f"""你是一位短视频营销策划专家。以下是当前抖音热搜榜：
+
+{topics_text}
+
+用户对话上下文：
 {conv_text}
 
-产品/方向: {product or '未明确'}
+用户产品/方向：{product or '未明确'}
 
-请用1-2句话简要开场，结合用户讨论的产品/方向。若有与产品相关的热搜，请指出「与您方向相关的热搜: xxx」。不要输出热搜列表本身，列表会由系统自动展示。"""
+请从中筛选出 8-10 个**可以用于内容营销的热点话题**。筛选标准：
+- 可以结合产品/品牌做内容蹭热点的
+- 有情感共鸣、能引发讨论的话题（适合做种草/情感营销）
+- 消费趋势、生活方式类话题
+- 节日/季节/社会热点中有营销切入点的
+
+排除纯娱乐八卦、政治新闻、负面事件等不适合营销的话题。
+
+对每个选中的话题，给出简短的营销切入建议。
+
+请严格输出 JSON 格式：
+{{"intro": "1-2句开场语，点明当前热点的营销价值", "topics": [{{"title": "热搜标题原文", "hot_value": "原始热度值", "marketing_angle": "15字以内的营销切入角度", "position": 序号}}]}}"""
 
                 try:
-                    ai_intro = await self.gemini.generate(prompt, max_tokens=300)
-                    if ai_intro and ai_intro.strip():
-                        summary = ai_intro.strip() + "\n\n当前抖音热搜Top10:\n" + topics_text
+                    ai_result = await self.gemini.generate(prompt, max_tokens=1500)
+                    # 解析 JSON
+                    import re as _re
+                    json_match = _re.search(r'\{[\s\S]*\}', ai_result)
+                    if json_match:
+                        parsed = json.loads(json_match.group())
+                        ai_topics = parsed.get("topics", [])
+                        summary = parsed.get("intro", "").strip()
+                        # 把 AI 筛选结果格式化为前端需要的格式
+                        marketing_topics = []
+                        for i, mt in enumerate(ai_topics[:10]):
+                            marketing_topics.append({
+                                "title": mt.get("title", ""),
+                                "hot_value": mt.get("hot_value", ""),
+                                "position": i + 1,
+                                "marketing_angle": mt.get("marketing_angle", ""),
+                            })
+                        if not summary:
+                            summary = "以下是当前可结合营销的热点话题，点击可搜索相关爆款视频："
                     else:
-                        summary = "当前抖音热搜Top10:\n" + topics_text
+                        raise ValueError("AI 未返回有效 JSON")
                 except Exception as e:
-                    logger.warning(f"热点AI润色失败: {e}")
-                    summary = "当前抖音热搜Top10:\n" + topics_text
+                    logger.warning(f"热点AI营销筛选失败: {e}")
+                    summary = "以下是当前抖音热搜中适合营销的话题："
+                    # fallback: 返回原始热搜前10
+                    marketing_topics = [
+                        {"title": t.get("title", ""), "hot_value": t.get("hot_value", ""),
+                         "position": i + 1, "marketing_angle": ""}
+                        for i, t in enumerate(topics[:10])
+                    ]
 
                 return {
                     "tool": "get_hot_topics",
                     "summary": summary,
-                    "data": {"topics": top10},
+                    "data": {"topics": marketing_topics},
                 }
 
             elif tool == "analyze_video":
@@ -3208,6 +3315,39 @@ DNA重组规则:
                     "tool": "search_web",
                     "summary": "\n".join(summary_parts),
                     "data": {"summary": summary, "sources": sources, "keyword": keyword},
+                }
+
+            elif tool == "get_inspiration":
+                product = session.get("product_name", "") or keyword
+                industry = session.get("industry", "")
+                if not product:
+                    # 从对话历史中提取产品名
+                    deep_ctx = session.get("deep_context", {})
+                    for m in deep_ctx.get("messages", [])[::-1]:
+                        if m.get("role") == "user" and len(m.get("content", "")) > 4:
+                            c = m["content"]
+                            if not any(kw in c for kw in ["找灵感", "灵感", "帮我找"]):
+                                product = c[:30]
+                                break
+                if not product:
+                    product = "短视频内容"
+                result = await self.deep_get_inspiration(
+                    session_id="", product_name=product, industry=industry
+                )
+                inspirations = result.get("inspirations", [])
+                raw_data = result.get("raw_data", {})
+                summary_parts = [f"为「{product}」找到{len(inspirations)}个灵感角度:"]
+                for ins in inspirations:
+                    summary_parts.append(f"  · {ins.get('angle', '')}: {ins.get('suggested_hook', '')}")
+                return {
+                    "tool": "get_inspiration",
+                    "summary": "\n".join(summary_parts),
+                    "data": {
+                        "inspirations": inspirations,
+                        "hot_topics": raw_data.get("hot_topics", []),
+                        "douyin_videos": raw_data.get("douyin_videos", []),
+                        "xhs_notes": raw_data.get("xhs_notes", []),
+                    },
                 }
 
         except Exception as e:

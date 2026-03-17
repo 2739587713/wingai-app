@@ -10,9 +10,17 @@ UPLOADS_DIR = DATA_DIR / "uploads"
 OUTPUTS_DIR = BASE_DIR / "outputs"
 BRAND_PROFILES_DIR = BASE_DIR / "brand_profiles"
 
-# ==================== Gemini API (柏拉图中转) ====================
-AI_BASE_URL = "https://api.bltcy.ai/v1"
-AI_API_KEY = "sk-Nv52MunZZDBX0uiDD0RlrDvG9E2OaNlhiiJoTQKDn0Sd5uJe"
+# ==================== 易API / APIYI (Gemini 中转 — 深度模式主力) ====================
+APIYI_BASE_URL = "https://api.apiyi.com/v1"
+APIYI_API_KEY = "sk-ys8xdflL5BSls9lW97A32736A37f4676B4Fe0334939bD0A8"
+
+# ==================== 柏拉图API (Gemini 中转 — 备用) ====================
+BLTCY_GEMINI_BASE_URL = "https://api.bltcy.ai/v1"
+BLTCY_GEMINI_API_KEY = "sk-Nv52MunZZDBX0uiDD0RlrDvG9E2OaNlhiiJoTQKDn0Sd5uJe"
+
+# ==================== 当前使用的 AI API (默认 APIYI) ====================
+AI_BASE_URL = os.getenv("AI_BASE_URL", APIYI_BASE_URL)
+AI_API_KEY = os.getenv("AI_API_KEY", APIYI_API_KEY)
 AI_MODEL = "gemini-2.5-flash"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", AI_API_KEY)
