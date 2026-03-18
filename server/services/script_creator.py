@@ -44,6 +44,12 @@ class ScriptCreator:
         self.tikhub = TikHubClient()
         self.tavily = TavilyClient()
         self.gemini = GeminiClient()
+        # 柏拉图 API 客户端（用于高消耗的联网搜索等，APIYI 余额不足时备用）
+        from config import BLTCY_GEMINI_API_KEY, BLTCY_GEMINI_BASE_URL
+        self.gemini_blt = GeminiClient(
+            api_key=BLTCY_GEMINI_API_KEY,
+            base_url=BLTCY_GEMINI_BASE_URL,
+        )
         self.sessions: Dict[str, Dict] = {}  # session_id -> session data
 
     async def save_draft(
@@ -3002,7 +3008,7 @@ DNA重组规则:
 回复要简洁专业，不超过200字。回复中不要提及播放量、点赞量、评论数等视频热度数据。"""
 
         try:
-            response = await self.gemini.generate(prompt, model_override="gemini-3.1-pro-preview")
+            response = await self.gemini_blt.generate(prompt, model_override="gemini-3.1-pro-preview")
             if not response or not str(response).strip():
                 response = "我理解你的想法了。你可以告诉我更多细节，或者说'帮我搜一下相关视频'来获取灵感。"
         except Exception as e:
@@ -3037,7 +3043,7 @@ DNA重组规则:
 {chr(10).join(f"{i+1}. {t}" for i, t in enumerate(titles))}
 
 请从上述热搜中选出与「{product}」最相关的10条（可用于内容创作、蹭热点、借势营销）。按相关性从高到低排序，返回JSON数组，格式如 ["热搜1", "热搜2", ...]。只返回数组，不要其他文字。"""
-            resp = await self.gemini.generate(prompt, max_tokens=500, model_override="gemini-3.1-pro-preview")
+            resp = await self.gemini_blt.generate(prompt, max_tokens=500, model_override="gemini-3.1-pro-preview")
             if not resp or not resp.strip():
                 return topics[:10]
             import json
@@ -3146,8 +3152,9 @@ DNA重组规则:
 只输出JSON数组，无其他文字。"""
 
         try:
-            raw = await self.gemini.generate(
+            raw = await self.gemini_blt.generate(
                 prompt,
+                model_override="gemini-3.1-pro-preview",
                 temperature=0.3,
                 max_tokens=4096,
                 enable_search=True,
@@ -3420,7 +3427,7 @@ DNA重组规则:
 {{"intro": "1-2句总结当前抖音有哪些值得{context_label}借势的热点趋势", "topics": [{{"title": "热点/梗名称（8字内）", "hot_value": "热度描述", "marketing_angle": "{context_label}怎么蹭这个热点（25字内）", "search_keyword": "用于在抖音搜索该热点参考视频的精准关键词（如'素颜爆改妆容'而非泛泛的'爆改'）", "position": 序号}}]}}"""
 
                 try:
-                    raw = await self.gemini.generate(
+                    raw = await self.gemini_blt.generate(
                         prompt, model_override="gemini-3.1-pro-preview",
                         max_tokens=8192, temperature=0.7,
                         enable_search=True,
@@ -3602,7 +3609,7 @@ DNA重组规则:
 3. hook是可直接拍的台词
 4. steps是具体拍摄步骤，每步15-20字"""
 
-                raw = await self.gemini.generate(
+                raw = await self.gemini_blt.generate(
                     prompt, model_override="gemini-3.1-pro-preview",
                     max_tokens=8192, temperature=0.8,
                 )
@@ -3715,7 +3722,7 @@ DNA重组规则:
 4. data_backing 中不要提及播放量、点赞量、评论数等视频热度数据"""
 
         try:
-            result = await self.gemini.generate(prompt, model_override="gemini-3.1-pro-preview")
+            result = await self.gemini_blt.generate(prompt, model_override="gemini-3.1-pro-preview")
             parsed = self._parse_json_response(result)
             if isinstance(parsed, dict) and "inspirations" in parsed:
                 inspirations = parsed["inspirations"]
@@ -3774,7 +3781,7 @@ DNA重组规则:
 
         # ── Step 1: Flash 提取需求 ──
         logger.info(f"[深度模式] Step1: 提取需求, session={session_id}")
-        extract_data = await self.gemini.generate_json(
+        extract_data = await self.gemini_blt.generate_json(
             model="gemini-3.1-pro-preview",
             system="你是一位短视频策划专家。从对话中提取关键信息，输出JSON。",
             prompt=(
@@ -3795,7 +3802,7 @@ DNA重组规则:
         # ── Step 2: Flash 设计 4 个差异化大纲 ──
         logger.info(f"[深度模式] Step2: 设计大纲, prod={prod}")
         risk_rules = "禁止极限词(最好用/第一/唯一) | 禁止医疗词 | 敏感肌→敏敏肌 | 美白→提亮肤色"
-        outlines_data = await self.gemini.generate_json(
+        outlines_data = await self.gemini_blt.generate_json(
             model="gemini-3.1-pro-preview",
             system=f"你是一位短视频脚本结构设计师。脚本将通过AI生图+AI生视频制作，不是真人拍摄。{ip_context}",
             prompt=(
@@ -3829,7 +3836,7 @@ DNA重组规则:
         async def expand_one(o: dict) -> Optional[dict]:
             for att in range(2):
                 try:
-                    r = await self.gemini.generate_json(
+                    r = await self.gemini_blt.generate_json(
                         model="gemini-3.1-pro-preview",
                         system=(
                             f"你是一位顶级短视频脚本创作者+AI视觉导演，台词100%口语化。"

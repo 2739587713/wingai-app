@@ -230,7 +230,7 @@ export default function App(){
     }catch(e){console.error("[saveToHistory] error:",e.message);return meta._historyId||Date.now();}
   };
   // 当前创作会话的历史记录ID，用于更新同一条记录
-  const [currentHistoryId,setCurrentHistoryId]=useState(null);
+  const [currentHistoryId,_setCurrentHistoryId]=useState(null);
   // 用ref追踪最新状态，避免异步函数中的闭包陷阱
   const sbShotsRef=useRef(sbShots);
   const adoptedRef=useRef(adopted);
@@ -238,21 +238,23 @@ export default function App(){
   const csRef=useRef(cs);
   const currentHistoryIdRef=useRef(currentHistoryId);
   const finalVideoUrlRef=useRef(finalVideoUrl);
+  // 同步更新ref+state，确保ref立刻可用
+  const setCurrentHistoryId=(v)=>{currentHistoryIdRef.current=v;_setCurrentHistoryId(v);};
   useEffect(()=>{sbShotsRef.current=sbShots;},[sbShots]);
   useEffect(()=>{adoptedRef.current=adopted;},[adopted]);
   useEffect(()=>{aiScriptsRef.current=aiScripts;},[aiScripts]);
   useEffect(()=>{csRef.current=cs;},[cs]);
-  useEffect(()=>{currentHistoryIdRef.current=currentHistoryId;},[currentHistoryId]);
   useEffect(()=>{finalVideoUrlRef.current=finalVideoUrl;},[finalVideoUrl]);
   // 更新当前创作会话的历史记录（保留同一个ID），使用ref获取最新值
   const updateHistory=(extraMeta={})=>{
     try{
       const hid=currentHistoryIdRef.current;
       const scripts=aiScriptsRef.current;
-      if(!hid||!scripts||scripts.length===0)return;
-      const curAdopted=adoptedRef.current;
-      const curSbShots=sbShotsRef.current;
-      const curFinalUrl=finalVideoUrlRef.current;
+      if(!hid||!scripts||scripts.length===0){console.warn("[updateHistory] skipped: hid=",hid,"scripts=",scripts?.length);return;}
+      // extraMeta 中传入的 adopted/sbShots 优先于 ref（解决 setState 后 ref 还没更新的问题）
+      const curAdopted=extraMeta.adopted!==undefined?extraMeta.adopted:adoptedRef.current;
+      const curSbShots=extraMeta.sbShots!==undefined?extraMeta.sbShots:sbShotsRef.current;
+      const curFinalUrl=extraMeta.finalVideoUrl!==undefined?extraMeta.finalVideoUrl:finalVideoUrlRef.current;
       // 清理sbShots：只保留可序列化的URL（http开头），过滤掉blob和过大的data URI
       const cleanShots=curSbShots&&curSbShots.length>0?curSbShots.map(s=>{
         const clean={...s,audioUrl:null};
@@ -278,6 +280,16 @@ export default function App(){
       if(!window.confirm("当前有内容正在生成中，加载历史记录会中断当前任务。确定要继续吗？"))return;
     }
     setProd(record.prod||"");setCat(record.cat||"");setDur(record.dur||"30秒");
+    // 图文AI模式：恢复到图文页面并填充结果
+    if(["xhs","dy_note","wx"].includes(record.mode)){
+      const notes=(record.scripts||[]).map(s=>s._noteData).filter(Boolean);
+      if(record.mode==="xhs"){setXhsNotes(notes);setXhsProd(record.prod||"");setXhsPhase("done");}
+      else if(record.mode==="dy_note"){setDyNotes(notes);setDyProd(record.prod||"");setDyPhase("done");}
+      else if(record.mode==="wx"){setWxArticles(notes);setWxProd(record.prod||"");setWxPhase("done");}
+      setPg("imgtext");
+      setItPlat(record.mode==="xhs"?"小红书":record.mode==="dy_note"?"抖音":"微信公众号");
+      return;
+    }
     const isAvatar=record.mode==="avatar";
     setAvatarOn(isAvatar);
     if(isAvatar){
@@ -303,9 +315,13 @@ export default function App(){
     let step=record.lastStep||"results";
     if(step==="generating")step="storyboard"; // generating不可恢复，回退
     if(step==="ai-generating")step="results"; // 同理
-    // 如果要跳到storyboard但没有sbShots数据，回退到detail
+    // 如果要跳到storyboard/preview但没有sbShots数据，回退到detail
     if((step==="storyboard"||step==="preview")&&(!record.sbShots||record.sbShots.length===0)){
       step=record.adopted?"detail":"results";
+    }
+    // 如果要跳到preview但没有finalVideoUrl（blob无法持久化），回退到storyboard
+    if(step==="preview"&&!record.finalVideoUrl){
+      step="storyboard";
     }
     setPg("create");setCs(step);activeCreatePg.current="create";
   };
@@ -735,7 +751,36 @@ export default function App(){
 
   const [ci,setCi]=useState("");
   const [deepSid,setDeepSid]=useState("");
-  const [msgs,setMsgs]=useState([{r:"bot",c:"你好！我是你的短视频创作顾问\n\n先告诉我你的产品/品牌和所在行业，比如「我做美白面膜」「我卖智能手表」，然后我帮你找热点、搜爆款、挖灵感——",acts:["找抖音热点","搜索爆款视频","搜小红书","帮我找灵感"]}]);
+  const [msgs,setMsgs]=useState([{r:"bot",c:"你好！我是你的短视频创作顾问\n\n先告诉我你的产品/品牌和所在行业，比如「我做美白面膜」「我卖智能手表」，然后我帮你找热点、搜爆款、挖灵感——",acts:["找抖音热点","搜索爆款视频","搜小红书","帮我找灵感"],isWelcome:true}]);
+  const [deepPickOpen,setDeepPickOpen]=useState(false); // 深度模式：选择对话记录弹窗
+  const [deepPickSel,setDeepPickSel]=useState(new Set()); // 选中的段落key集合，格式 "msgIdx-secIdx"
+  const [deepPickExpand,setDeepPickExpand]=useState(new Set()); // 展开的消息索引
+  // 把消息文本拆成段落/章节
+  const splitSections=(text)=>{
+    if(!text)return[""];
+    const lines=text.split("\n");
+    const sections=[];
+    let cur=[];
+    const flush=()=>{const t=cur.join("\n").trim();if(t.length>3)sections.push(t);cur=[];};
+    for(const line of lines){
+      const trimmed=line.trim();
+      // 新section的标志：序号开头、标题标记、分隔线、emoji标记
+      const isNewSec=/^(?:\d+[.、)）]|[一二三四五六七八九十][、.]|#{1,3}\s|[【】═─▶📊🔍💡🎬❤️✅⭐🔥•·\-\*]\s*\S|^>)/.test(trimmed);
+      const isSeparator=/^[═─\-=]{3,}$/.test(trimmed);
+      const isEmpty=trimmed==="";
+      if(isSeparator){flush();continue;}
+      if(isEmpty&&cur.length>0&&cur.join("").trim().length>20){flush();continue;}
+      if(isNewSec&&cur.length>0&&cur.join("").trim().length>10){flush();}
+      if(!isEmpty)cur.push(line);
+    }
+    flush();
+    // 如果只有1段且很长（>300字），尝试按段落再拆
+    if(sections.length===1&&sections[0].length>300){
+      const sub=sections[0].split(/\n\n+/);
+      if(sub.length>1)return sub.map(s=>s.trim()).filter(s=>s.length>3);
+    }
+    return sections.length>0?sections:[""];
+  };
   const chatRef=useRef(null);
   useEffect(()=>{if(chatRef.current)chatRef.current.scrollTop=chatRef.current.scrollHeight;},[msgs]);
 
@@ -920,7 +965,7 @@ export default function App(){
     if(v)setSbVoice(v.id);
   };
   const genOneImage=async(prompt)=>{
-    const r=await fetch("/api-proxy/v1/images/generations",{method:"POST",headers:APIYI_HDRS,body:JSON.stringify({model:"gpt-image-1.5",prompt,n:1,size:"1024x1536",quality:"high"})});
+    const r=await fetch("/blt-proxy/v1/images/generations",{method:"POST",headers:BLT_HDRS,body:JSON.stringify({model:"gpt-image-1.5",prompt,n:1,size:"1024x1536",quality:"high"})});
     if(!r.ok)throw new Error("图片API "+r.status);
     const buf=await r.arrayBuffer();const text=new TextDecoder().decode(buf);const d=JSON.parse(text);
     if(d.error)throw new Error(d.error.message);
@@ -1110,7 +1155,7 @@ export default function App(){
   };
   const approveFrame=(i)=>{setSbShots(prev=>{const n=[...prev];n[i]={...n[i],status:"approved"};return n;});};
   const rejectFrame=(i,fb)=>{setSbShots(prev=>{const n=[...prev];n[i]={...n[i],status:"rejected",feedback:fb||""};return n;});};
-  const approveAll=()=>{setSbShots(prev=>prev.map(s=>s.status==="generated"||s.status==="rejected"?{...s,status:"approved",feedback:""}:s));setTimeout(()=>updateHistory({lastStep:"storyboard"}),300);};
+  const approveAll=()=>{setSbShots(prev=>{const updated=prev.map(s=>s.status==="generated"||s.status==="rejected"?{...s,status:"approved",feedback:""}:s);setTimeout(()=>updateHistory({lastStep:"storyboard",sbShots:updated}),100);return updated;});};
   const pickVersion=(i,vIdx)=>{setSbShots(prev=>{const n=[...prev];n[i]={...n[i],imageUrl:n[i].imageVersions[vIdx]||n[i].imageUrl};return n;});};
   const regenFrame=async(i,feedback)=>{
     setSbShots(prev=>{const n=[...prev];n[i]={...n[i],status:"regenerating"};return n;});
@@ -1526,6 +1571,8 @@ ${styleList}
       if(!notes.length)throw new Error("未生成笔记");
       setXhsNotes(notes);
       setXhsPhase("done");
+      // 保存到创作历史
+      saveToHistory(notes.map((n,i)=>({id:i+1,name:n.title||`笔记${i+1}`,dur:"-",shots:0,sell:0,desc:(n.content||"").slice(0,60),badges:[{t:"小红书",c:"exp"}],logic:[],table:[],_noteData:n})),{mode:"xhs",prod:xhsProd,cat:"小红书笔记",lastStep:"results"});
     }catch(e){
       console.error("[XHS] generate error:",e);
       alert("生成失败："+e.message);
@@ -1719,6 +1766,8 @@ ${styleList}
       if(!notes.length)throw new Error("未生成图文");
       setDyNotes(notes);
       setDyPhase("done");
+      // 保存到创作历史
+      saveToHistory(notes.map((n,i)=>({id:i+1,name:n.title||`图文${i+1}`,dur:"-",shots:0,sell:0,desc:(n.content||"").slice(0,60),badges:[{t:"抖音图文",c:"exp"}],logic:[],table:[],_noteData:n})),{mode:"dy_note",prod:dyProd,cat:"抖音图文",lastStep:"results"});
     }catch(e){
       console.error("[DY] generate error:",e);
       alert("生成失败："+e.message);
@@ -1899,6 +1948,8 @@ ${styleList}
       if(!articles.length)throw new Error("未生成文章");
       setWxArticles(articles);
       setWxPhase("done");
+      // 保存到创作历史
+      saveToHistory(articles.map((a,i)=>({id:i+1,name:a.title||`文章${i+1}`,dur:"-",shots:0,sell:0,desc:(a.content||"").slice(0,60),badges:[{t:"公众号",c:"auth"}],logic:[],table:[],_noteData:a})),{mode:"wx",prod:wxProd,cat:"微信公众号",lastStep:"results"});
     }catch(e){
       console.error("[WX] generate error:",e);
       alert("生成失败："+e.message);
@@ -2554,23 +2605,72 @@ JSON格式（严格遵守，不要多余文字）：
         return;
       }
 
-      // ── 判断是否需要联网搜索 ──
-      const searchCmds=["搜索爆款视频","搜小红书","帮我找灵感","找抖音热点"];
-      const needSearch=searchCmds.some(cmd=>t.includes(cmd))||t.match(/搜索|搜一下|找一下|查一下|热点|爆款|趋势/);
-      if(needSearch){
-        setMsgs(prev=>prev.map(m=>m.typing?{...m,c:"正在联网搜索..."}:m));
-        const chatContext=n.slice(-6).filter(m=>m.r==="user").map(m=>m.c).join("；");
-        const searchResult=await callLLM({model:"qwen3-max",system:"你是一位短视频内容策略顾问，擅长通过联网搜索找到最新爆款内容和行业趋势。用中文回答，结构清晰，重点突出。",prompt:`用户在创作对话中提出了以下需求：「${t}」\n\n对话上下文：${chatContext}\n产品/品类：${prod||"用户尚未说明"}\n\n请联网搜索相关信息，给出有价值的分析和建议。如果用户要搜爆款视频，重点搜索抖音/快手/小红书上的爆款案例并拆解。如果用户要找灵感，从多个角度提供创意方向。如果用户要看热点，搜索当前热门话题并分析结合点。`,temperature:0.3,maxTokens:4096,enableSearch:true});
-        setMsgs(prev=>[...prev.filter(m=>!m.typing),{r:"bot",c:searchResult,acts:["根据这些信息生成脚本","继续深挖","换个方向"]}]);
-      }else{
-      // ── 普通对话用Gemini ──
-      const chatHist=n.filter(m=>m.r==="user"||m.r==="bot").slice(-12).map(m=>({role:m.r==="user"?"user":"assistant",content:(m.c||"").slice(0,500)}));
-      const resp=await callLLM({model:"gemini-3.1-pro-preview",messages:[{role:"system",content:`你是一位短视频创作顾问，在MCN机构工作8年，帮助过上百个品牌做短视频内容策划。\n\n你的工作方式：\n1. 通过对话了解用户的产品、品牌、目标受众\n2. 挖掘产品卖点和差异化优势\n3. 分析目标受众的痛点和需求\n4. 建议创作方向和脚本风格\n5. 当信息足够时，提醒用户可以生成脚本\n\n回复规则：\n- 简洁有力，不要太长（100-200字）\n- 多提问引导用户说出更多信息\n- 给出具体、专业的建议而不是泛泛而谈\n- 如果用户说了产品信息，立刻分析卖点和受众\n- 对话3轮以上且信息充足时，主动建议"信息差不多了，可以点击下方按钮生成脚本了"\n\n用户当前填写的信息：\n- 产品：${prod||"未填写"}\n- 品类：${cat||"未填写"}\n- 时长：${dur||"30秒"}`},...chatHist],temperature:0.7,maxTokens:1024});
-      const botMsg={r:"bot",c:resp};
-      const userMsgCount=n.filter(m=>m.r==="user").length;
-      if(userMsgCount>=3)botMsg.acts=["好的，帮我生成脚本","再聊聊其他方向"];
+      // ── 前端拦截：灵感雷达（帮我找灵感） ──
+      if(t.includes("帮我找灵感")||t.includes("找灵感")||t.includes("找创意")){
+        const prodCtx=prod||n.slice(-6).filter(m=>m.r==="user").map(m=>m.c).join("；")||"通用产品";
+        const catCtx=cat||"通用";
+        setMsgs(prev=>prev.map(m=>m.typing?{...m,c:"灵感雷达启动中...正在并行搜索4个维度"}:m));
+        // 并行搜索4个维度
+        const [hotRes,painRes,crossRes,trendRes]=await Promise.all([
+          callLLM({model:"qwen3-max",system:"你是短视频爆款分析师。",prompt:`搜索「${prodCtx}」（${catCtx}）品类最近30天的抖音/快手爆款短视频，找5个最值得参考的。\n\n对每个视频给出：\n1. 视频标题/描述\n2. 核心hook（前3秒怎么抓人的）\n3. 脚本结构公式\n4. 为什么爆（1句话）\n5. 可复用的点\n\n用编号列表输出，简洁有力。`,temperature:0.3,maxTokens:2048,enableSearch:true}).catch(()=>"搜索失败"),
+          callLLM({model:"qwen3-max",system:"你是用户洞察专家。",prompt:`搜索「${prodCtx}」（${catCtx}）品类的用户真实痛点和吐槽。从以下渠道挖掘：\n- 抖音/小红书评论区的高赞吐槽\n- 知乎/贴吧的真实提问\n- 电商平台的差评关键词\n\n总结5个最扎心的痛点，每个痛点给出：\n1. 痛点描述（用户原话风格）\n2. 情绪强度（1-10）\n3. 可以怎么用在短视频开头（具体hook示例）\n\n用编号列表输出。`,temperature:0.3,maxTokens:2048,enableSearch:true}).catch(()=>"搜索失败"),
+          callLLM({model:"qwen3-max",system:"你是跨品类创意迁移专家。",prompt:`「${prodCtx}」（${catCtx}）品类的短视频已经很卷了。请搜索其他品类（如食品、数码、母婴、宠物等）最近的爆款创意手法，找5个可以迁移到「${catCtx}」的创意方向。\n\n每个方向给出：\n1. 原品类+原创意手法\n2. 为什么在原品类爆了\n3. 怎么迁移到「${catCtx}」（具体做法）\n4. 预期效果\n\n要求：不是泛泛的建议，是具体的、可操作的创意方案。`,temperature:0.5,maxTokens:2048,enableSearch:true}).catch(()=>"搜索失败"),
+          callLLM({model:"qwen3-max",system:"你是热点营销专家。",prompt:`搜索当前（${new Date().toLocaleDateString("zh-CN")}）的热搜话题、即将到来的节日/节点、社会热议事件。找5个能和「${prodCtx}」（${catCtx}）结合的热点。\n\n每个热点给出：\n1. 热点话题\n2. 热度/时效性\n3. 和「${prodCtx}」的结合点（具体创意方向）\n4. 短视频hook示例\n\n要求：结合点要自然不生硬，hook要有爆款潜力。`,temperature:0.3,maxTokens:2048,enableSearch:true}).catch(()=>"搜索失败"),
+        ]);
+        // 用Gemini把4个维度的结果整合为结构化灵感卡片
+        setMsgs(prev=>prev.map(m=>m.typing?{...m,c:"搜索完成，AI正在提炼灵感卡片..."}:m));
+        const cardsResult=await generateJSON({model:"gemini-3.1-pro-preview",system:"你是一位顶级短视频创意总监。根据多维度搜索结果，提炼出最有爆款潜力的创意方向。严格输出JSON。",prompt:`以下是针对「${prodCtx}」（${catCtx}）的4个维度搜索结果：\n\n══ 维度1：同品类爆款拆解 ══\n${hotRes}\n\n══ 维度2：用户真实痛点 ══\n${painRes}\n\n══ 维度3：跨品类创意迁移 ══\n${crossRes}\n\n══ 维度4：热点结合机会 ══\n${trendRes}\n\n请提炼出6张灵感卡片，每张代表一个独特的创意方向。要求：\n- 6张卡片必须来自不同维度的交叉组合（如"痛点×热点""爆款手法×跨品类"）\n- 每张卡片要具体到可以直接开拍的程度\n\nJSON格式：\n{"cards":[{"title":"创意方向名（10字内，像爆款标题一样吸引人）","source":"灵感来源（如：爆款拆解×痛点洞察）","angle":"切入角度（2-3句话，具体描述这个视频要怎么拍）","hook":"前3秒台词示例（完整的开头话术）","emotion":"情绪路线（如：焦虑→惊喜→种草）","potential":"爆款潜力评级 S/A/B","reason":"为什么有潜力（1句话）","ref":"参考案例或数据支撑（从搜索结果中引用）"}]}`,temperature:0.5,maxTokens:4096});
+        const cards=cardsResult?.cards||[];
+        if(cards.length>0){
+          // 构建灵感卡片消息
+          const botMsg={r:"bot",c:"灵感雷达扫描完成！为你找到 "+cards.length+" 个创意方向：",inspirationCards:cards,
+            acts:["用第1个方向生成脚本","用第2个方向生成脚本","换一批灵感"]};
+          setMsgs(prev=>[...prev.filter(m=>!m.typing),botMsg]);
+        }else{
+          setMsgs(prev=>[...prev.filter(m=>!m.typing),{r:"bot",c:"灵感搜索完成，但未能提炼出结构化卡片。以下是原始搜索结果：\n\n**爆款拆解：**\n"+hotRes+"\n\n**用户痛点：**\n"+painRes+"\n\n**跨品类灵感：**\n"+crossRes+"\n\n**热点结合：**\n"+trendRes}]);
+        }
+        return;
+      }
+
+      // ── 所有对话走后端 deep/chat API ──
+      const chatHist=n.filter(m=>m.r==="user"||m.r==="bot").map(m=>({role:m.r==="user"?"user":"assistant",content:m.c||""}));
+      const resp=await fetch("/api/script/deep/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:deepSid,message:t,chat_history:chatHist,product_name:null,industry:null})});
+      if(!resp.ok){const txt=await resp.text();throw new Error(`API ${resp.status}: ${txt.slice(0,200)}`);}
+      const data=await resp.json();
+      if(!data.success)throw new Error(data.detail||"对话失败");
+      if(data.session_id&&!deepSid)setDeepSid(data.session_id);
+      const botMsg={r:"bot",c:data.response};
+      // ── 工具结果渲染 ──
+      if(data.tool_used==="search_douyin"&&data.tool_data?.need_input){
+        botMsg.viralTypes=data.tool_data.viral_types;
+      }else if(data.tool_used==="search_douyin"&&data.tool_data?.videos){
+        botMsg.videos=data.tool_data.videos;
+        botMsg.viralLabel=data.tool_data.viral_label||"";
+      }else if(data.tool_used==="search_xiaohongshu"&&data.tool_data?.need_input){
+        // 小红书需要用户先提供关键词
+      }else if(data.tool_used==="search_xiaohongshu"&&data.tool_data?.notes){
+        botMsg.notes=data.tool_data.notes;
+      }else if(data.tool_used==="get_hot_topics"&&data.tool_data?.need_input){
+        // 热点需要先提供产品/行业
+      }else if(data.tool_used==="get_hot_topics"&&data.tool_data?.topics){
+        const hotCtx=data.tool_data.context||"";
+        botMsg.hots=data.tool_data.topics.map(h=>({t:h.title,ct:h.hot_value?`热度 ${h.hot_value}`:`#${h.position}`,ma:h.marketing_angle||"",sk:h.search_keyword||h.title}));
+        botMsg.hotContext=hotCtx;
+      }else if(data.tool_used==="search_web"&&data.tool_data?.sources){
+        botMsg.webResults=data.tool_data.sources;
+      }else if(data.tool_used==="get_inspiration"&&data.tool_data?.need_input){
+        // 灵感需要先提供产品
+      }else if(data.tool_used==="get_inspiration"&&data.tool_data?.inspirations){
+        const ins=data.tool_data.inspirations;
+        const ht=(data.tool_data.hot_topics||[]).slice(0,5);
+        if(ht.length)botMsg.hots=ht.map(h=>({t:h.description||h.title||"",ct:h.hot_value?`热度 ${h.hot_value}`:`#${h.position||""}`}));
+        botMsg.angs=ins.map(a=>({ic:"💡",t:a.angle||"",s:a.source||"",d:a.suggested_hook||a.data_backing||""}));
+        botMsg.sum=ins.map(a=>a.data_backing||"").filter(Boolean).join(" | ");
+      }else if(data.tool_used==="design_trend_plan"&&data.tool_data?.plans){
+        botMsg.trendPlans={trend:data.tool_data.trend||"",product:data.tool_data.product||"",refVideos:data.tool_data.ref_videos||[],plans:data.tool_data.plans||[],activeTab:0};
+      }
+      if(data.script_ready)botMsg.acts=["好的，帮我生成脚本","再聊聊其他方向"];
       setMsgs(prev=>[...prev.filter(m=>!m.typing),botMsg]);
-      } // end else (非搜索对话)
     }catch(e){
       console.error("[deep chat]",e);
       setMsgs(prev=>[...prev.filter(m=>!m.typing),{r:"bot",c:"出了点问题："+e.message+"\n\n请检查网络连接后重试。"}]);
@@ -4922,17 +5022,17 @@ div:hover>.sch-inline-del{opacity:1 !important}
           </div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
             <div className="hist-tabs">
-              {["全部","快速模式","深度定制","数字人"].map((t,i)=><button key={i} className={`hist-tab ${histTab===i?"on":""}`} onClick={()=>setHistTab(i)}>{t}</button>)}
+              {["全部","快速模式","深度定制","数字人","图文AI"].map((t,i)=><button key={i} className={`hist-tab ${histTab===i?"on":""}`} onClick={()=>setHistTab(i)}>{t}</button>)}
             </div>
             {creationHistory.length>0&&<button style={{padding:"6px 14px",border:"1.5px solid #F87171",borderRadius:8,background:"#FFF5F5",color:"#EF4444",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}} onClick={clearHistory}>清空历史</button>}
           </div>
           {(()=>{
-            const modeMap=["","quick","deep","avatar"];
-            const filtered=histTab===0?creationHistory:creationHistory.filter(r=>r.mode===modeMap[histTab]);
+            const modeMap=["","quick","deep","avatar","_note"];
+            const filtered=histTab===0?creationHistory:histTab===4?creationHistory.filter(r=>["xhs","dy_note","wx"].includes(r.mode)):creationHistory.filter(r=>r.mode===modeMap[histTab]);
             if(filtered.length===0)return <div className="hist-empty">{histTab===0?"暂无创作记录，去快速模式创建第一个脚本吧":"该分类暂无记录"}</div>;
             return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>{filtered.map(r=>{
-              const modeLabel=r.mode==="deep"?"深度定制":r.mode==="avatar"?"数字人":"快速模式";
-              const modeColor=r.mode==="deep"?"#8B5CF6":r.mode==="avatar"?"#14B8A6":"#F59E0B";
+              const modeLabel=r.mode==="deep"?"深度定制":r.mode==="avatar"?"数字人":r.mode==="xhs"?"小红书笔记":r.mode==="dy_note"?"抖音图文":r.mode==="wx"?"公众号文章":"快速模式";
+              const modeColor=r.mode==="deep"?"#8B5CF6":r.mode==="avatar"?"#14B8A6":r.mode==="xhs"?"#FF2442":r.mode==="dy_note"?"#000000":r.mode==="wx"?"#07C160":"#F59E0B";
               const timeStr=(()=>{const d=new Date(r.time);const now=new Date();const diff=now-d;if(diff<60000)return"刚刚";if(diff<3600000)return Math.floor(diff/60000)+"分钟前";if(diff<86400000)return Math.floor(diff/3600000)+"小时前";if(diff<604800000)return Math.floor(diff/86400000)+"天前";return d.toLocaleDateString("zh-CN",{month:"short",day:"numeric"});})();
               return <div key={r.id} style={{background:"var(--s)",border:"1px solid var(--bl)",borderRadius:14,padding:18,cursor:"pointer",transition:"all .25s ease"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--pl)";e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 4px 14px rgba(0,0,0,.06)";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--bl)";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}} onClick={()=>restoreFromHistory(r)}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -5801,7 +5901,7 @@ div:hover>.sch-inline-del{opacity:1 !important}
                 <div className="vp-info-t">{prod} · 脚本视频</div>
                 <div className="vp-info-meta"><span>⏱ {dur}</span><span>🎬 {sbShots.length}个分镜</span><span>📦 {cat}</span><span>⏳ 用时{sbElapsed}秒</span><span>🎙 {VOICES.find(v=>v.id===sbVoice)?.name||"晓晓"}</span></div>
                 <div className="vp-acts">
-                  <button className="vp-act pri" onClick={()=>{activeCreatePg.current=null;setPg("dash");}}><I.Check/> 确认完成</button>
+                  <button className="vp-act pri" onClick={()=>{updateHistory({lastStep:"preview"});activeCreatePg.current=null;setPg("dash");}}><I.Check/> 确认完成</button>
                   {finalVideoUrl&&<a href={finalVideoUrl} download={`${prod}_视频.mp4`} style={{textDecoration:"none"}}><button className="vp-act sec"><I.Download/> 导出视频</button></a>}
                   <button className="vp-act sec" onClick={()=>{setPg("schedule");}}><I.Copy/> 发布到排期</button>
                   <button className="vp-act sec" onClick={()=>setCs("storyboard")}><I.Edit/> 编辑分镜</button>
@@ -5821,15 +5921,20 @@ div:hover>.sch-inline-del{opacity:1 !important}
               <div className="dp-hd-d">对话式深度挖掘你的创作需求</div>
             </div>
             <div className="dp-sec-t">快捷指令</div>
-            {[{icon:<I.Bulb/>,t:"帮我找灵感",d:"并行搜索多数据源挖掘角度"},{icon:<I.Search/>,t:"搜索爆款视频",d:"按爆款类型筛选抖音视频"},{icon:<I.Search/>,t:"搜小红书",d:"搜索同类小红书笔记"},{icon:<I.Link/>,t:"分析竞品链接",d:"拆解竞品脚本结构"}].map((c,i)=>
-              <div key={i} className="dp-card" onClick={()=>send(c.t)}><div className="dp-ic">{c.icon}</div><div><div className="dp-t">{c.t}</div><div className="dp-d">{c.d}</div></div></div>
+            {[{icon:<I.Fire/>,t:"找抖音热点",d:"搜索可借势的流行梗和挑战",gradient:"linear-gradient(135deg,#FEE2E2,#FECACA)",iconBg:"#FEE2E2",iconColor:"#DC2626"},{icon:<I.Bulb/>,t:"帮我找灵感",d:"并行搜索多数据源挖掘角度",gradient:"linear-gradient(135deg,#F5F0FF,#EDE9FE)",iconBg:"var(--pbg)",iconColor:"var(--p)"},{icon:<I.Search/>,t:"搜索爆款视频",d:"按爆款类型筛选抖音视频",gradient:"linear-gradient(135deg,#FEF3C7,#FDE68A)",iconBg:"#FEF3C7",iconColor:"#D97706"},{icon:<I.Search/>,t:"搜小红书",d:"搜索同类小红书笔记",gradient:"linear-gradient(135deg,#FFE4E6,#FECDD3)",iconBg:"#FFE4E6",iconColor:"#E11D48"},{icon:<I.Link/>,t:"分析竞品链接",d:"拆解竞品脚本结构",gradient:"linear-gradient(135deg,#DBEAFE,#BFDBFE)",iconBg:"#DBEAFE",iconColor:"#2563EB"}].map((c,i)=>
+              <div key={i} className="dp-card" onClick={()=>send(c.t)}><div className="dp-ic" style={{background:c.iconBg,color:c.iconColor}}>{c.icon}</div><div><div className="dp-t">{c.t}</div><div className="dp-d">{c.d}</div></div></div>
             )}
           </div>
           <div className="srt">
             <div className="cc">
               <div className="cmsg" ref={chatRef}>
-                {msgs.length<=1&&<div className="chat-welcome"><div className="chat-welcome-ic"><I.Bot/></div><div className="chat-welcome-t">你好，我是你的AI创作顾问</div><div className="chat-welcome-d">告诉我你想创作什么内容，或者选择左侧快捷指令开始</div></div>}
-                {msgs.map((m,i)=><div key={i} className={`mg ${m.r==="user"?"u":"bot"} fn`}><div className={`ma ${m.r==="user"?"usr":"bot"}`}>{m.r==="user"?"你":<I.Bot/>}</div><div style={{maxWidth:"85%",minWidth:0}}><div className={"mbu"+(m.typing?" typing-dots":"")}><div style={{whiteSpace:"pre-wrap"}}>{m.c}</div>
+                {msgs.length<=1&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"60%",gap:12,opacity:.9}}>
+                  <div style={{width:56,height:56,borderRadius:16,background:"linear-gradient(135deg,var(--p),#A78BFA)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:24,boxShadow:"0 4px 20px rgba(124,58,237,.25)"}}><I.Bot/></div>
+                  <div style={{fontSize:18,fontWeight:800,color:"var(--t1)",letterSpacing:"-.3px"}}>AI 创作顾问</div>
+                  <div style={{fontSize:12,color:"var(--t3)",textAlign:"center",lineHeight:1.6,maxWidth:320}}>先告诉我你的产品/品牌和行业<br/>然后我帮你找热点、搜爆款、挖灵感</div>
+                  <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap",justifyContent:"center"}}>{[{t:"找抖音热点",ic:"🔥",bg:"#FEE2E2",bc:"#FECACA",c:"#DC2626"},{t:"搜索爆款视频",ic:"📈",bg:"#FEF3C7",bc:"#FDE68A",c:"#D97706"},{t:"搜小红书",ic:"📕",bg:"#FFE4E6",bc:"#FECDD3",c:"#E11D48"},{t:"帮我找灵感",ic:"💡",bg:"#F5F0FF",bc:"#DDD6FE",c:"#7C3AED"}].map((b,j)=><button key={j} style={{padding:"8px 14px",borderRadius:20,border:`1.5px solid ${b.bc}`,background:b.bg,color:b.c,fontSize:11,fontWeight:600,cursor:"pointer",transition:"all .2s",display:"flex",alignItems:"center",gap:4,fontFamily:"inherit"}} onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,.08)";}} onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}} onClick={()=>send(b.t)}>{b.ic} {b.t}</button>)}</div>
+                </div>}
+                {msgs.map((m,i)=>m.isWelcome?null:<div key={i} className={`mg ${m.r==="user"?"u":"bot"} fn`}><div className={`ma ${m.r==="user"?"usr":"bot"}`}>{m.r==="user"?"你":<I.Bot/>}</div><div style={{maxWidth:"85%",minWidth:0}}><div className={"mbu"+(m.typing?" typing-dots":"")}><div style={{whiteSpace:"pre-wrap"}}>{m.c}</div>
                 {m.compAnalysis&&m.compVideo&&(()=>{const a=m.compAnalysis,v=m.compVideo;const lvlColor={"S":"#E53E3E","A":"#D97706","B":"#3B82F6","C":"#6B7280"}[a.viral_level]||"#7C3AED";const lvlBg={"S":"linear-gradient(135deg,#FEE2E2,#FECACA)","A":"linear-gradient(135deg,#FEF3C7,#FDE68A)","B":"linear-gradient(135deg,#DBEAFE,#BFDBFE)","C":"linear-gradient(135deg,#F4F4F5,#E4E4E7)"}[a.viral_level]||"linear-gradient(135deg,#F5F0FF,#EDE9FE)";const lvlGlow={"S":"0 0 20px rgba(229,62,62,.15)","A":"0 0 20px rgba(217,119,6,.12)","B":"0 0 20px rgba(59,130,246,.12)","C":"none"}[a.viral_level]||"none";return <div style={{marginTop:14}}>
 <div style={{borderRadius:18,overflow:"hidden",marginBottom:14,border:"1px solid var(--bl)",boxShadow:"0 2px 12px rgba(0,0,0,.06)",background:"#fff"}}>
 <div style={{display:"flex",gap:0,background:"linear-gradient(135deg,#18181B,#1E1E24)",position:"relative",cursor:v.url?"pointer":"default",transition:"all .2s"}} onMouseEnter={e=>{if(v.url)e.currentTarget.style.opacity=".92";}} onMouseLeave={e=>{e.currentTarget.style.opacity="1";}} onClick={()=>{if(v.url)window.open(v.url,"_blank");}}>
@@ -5855,7 +5960,28 @@ div:hover>.sch-inline-del{opacity:1 !important}
 {a.viral_formula&&<div style={{background:"linear-gradient(135deg,#18181B,#27272A)",borderRadius:14,padding:"20px 24px",marginBottom:12,position:"relative",overflow:"hidden"}}><div style={{position:"absolute",top:-30,right:-30,width:100,height:100,background:"radial-gradient(circle,rgba(124,58,237,.2),transparent)"}}/><div style={{position:"absolute",bottom:-20,left:-20,width:80,height:80,background:"radial-gradient(circle,rgba(236,72,153,.1),transparent)"}}/><div style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,.4)",marginBottom:10,letterSpacing:2,textTransform:"uppercase"}}>VIRAL FORMULA</div><div style={{fontSize:16,fontWeight:800,lineHeight:1.6,marginBottom:10,background:"linear-gradient(90deg,#A78BFA,#EC4899)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>{a.viral_formula.formula||""}</div><div style={{fontSize:11,color:"rgba(255,255,255,.55)",lineHeight:1.7}}>{a.viral_formula.explanation||""}</div></div>}
 {a.optimization?.length>0&&<div style={{background:"#fff",borderRadius:14,padding:"18px 20px",border:"1px solid var(--bl)",boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}><div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#F5F0FF,#EDE9FE)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>💡</div><div><div style={{fontSize:13,fontWeight:700,color:"var(--t1)"}}>优化建议</div><div style={{fontSize:10,color:"var(--t3)"}}>可落地的改进方向</div></div></div>{a.optimization.map((o,j)=><div key={j} style={{display:"flex",gap:12,marginBottom:j<a.optimization.length-1?12:0,alignItems:"flex-start",padding:"10px 14px",borderRadius:10,background:j===0?"linear-gradient(135deg,#F5F0FF,#EDE9FE)":"var(--s2)",border:"1px solid "+(j===0?"#DDD6FE":"var(--bl)"),transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.transform="translateX(3px)";}} onMouseLeave={e=>{e.currentTarget.style.transform="none";}}><div style={{width:26,height:26,borderRadius:13,background:j===0?"var(--p)":"var(--s3)",color:j===0?"#fff":"var(--t2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,flexShrink:0}}>{j+1}</div><div style={{flex:1}}><div style={{fontSize:12,fontWeight:700,color:"var(--t1)",marginBottom:3}}>{o.title||""}</div><div style={{fontSize:11,color:"var(--t2)",lineHeight:1.6}}>{o.detail||""}</div></div></div>)}</div>}
 </div>;})()}
-                {m.acts&&<div className="qab" style={{marginTop:10}}>{m.acts.map((a,j)=><button key={j} className="qa" onClick={()=>send(a)}>{a}</button>)}</div>}
+                {m.inspirationCards&&<div style={{marginTop:14,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  {m.inspirationCards.map((card,j)=>{const potColor=card.potential==="S"?"#E53E3E":card.potential==="A"?"#D97706":"#3B82F6";const potBg=card.potential==="S"?"#FEE2E2":card.potential==="A"?"#FEF3C7":"#DBEAFE";return <div key={j} style={{borderRadius:14,border:"1.5px solid var(--bl)",background:"#fff",overflow:"hidden",transition:"all .2s",cursor:"default"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--pl)";e.currentTarget.style.boxShadow="0 4px 14px rgba(0,0,0,.08)";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--bl)";e.currentTarget.style.boxShadow="none";}}>
+                    <div style={{padding:"14px 16px 10px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                        <span style={{fontSize:9,padding:"2px 8px",borderRadius:6,background:"var(--pbg)",color:"var(--p)",fontWeight:600}}>{card.source||"灵感"}</span>
+                        <span style={{fontSize:12,fontWeight:900,color:potColor,background:potBg,padding:"2px 10px",borderRadius:8}}>{card.potential||"B"}</span>
+                      </div>
+                      <div style={{fontSize:14,fontWeight:800,color:"var(--t1)",lineHeight:1.4,marginBottom:6}}>{card.title}</div>
+                      <div style={{fontSize:11,color:"var(--t2)",lineHeight:1.6,marginBottom:8}}>{card.angle}</div>
+                      <div style={{background:"var(--s2)",borderRadius:8,padding:"8px 12px",marginBottom:8}}>
+                        <div style={{fontSize:9,color:"var(--t3)",fontWeight:600,marginBottom:3}}>HOOK 示例</div>
+                        <div style={{fontSize:12,color:"var(--t1)",fontWeight:600,lineHeight:1.5,fontStyle:"italic"}}>"{card.hook}"</div>
+                      </div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+                        <span style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:"#F0FDF4",color:"#059669"}}>{card.emotion}</span>
+                      </div>
+                      {card.ref&&<div style={{fontSize:10,color:"var(--t3)",lineHeight:1.5,borderTop:"1px solid var(--bl)",paddingTop:6}}>{card.ref}</div>}
+                    </div>
+                    <button style={{width:"100%",padding:"10px",border:"none",borderTop:"1px solid var(--bl)",background:"var(--pbg)",color:"var(--p)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.background="var(--p)";e.currentTarget.style.color="#fff";}} onMouseLeave={e=>{e.currentTarget.style.background="var(--pbg)";e.currentTarget.style.color="var(--p)";}} onClick={()=>send("用这个方向生成脚本："+card.title+"。切入角度："+card.angle+"。hook："+card.hook)}>用这个方向生成脚本</button>
+                  </div>;})}
+                </div>}
+                {m.acts&&!m.isWelcome&&<div className="qab" style={{marginTop:10}}>{m.acts.map((a,j)=><button key={j} className="qa" onClick={()=>send(a)}>{a}</button>)}</div>}
                 {m.viralTypes&&<div style={{marginTop:12}}><div style={{display:"grid",gap:8}}>{m.viralTypes.map((vt,j)=><div key={j} style={{padding:"12px 16px",background:"var(--s2)",borderRadius:10,border:"1.5px solid var(--bl)",cursor:"pointer",transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--pl)";e.currentTarget.style.background="var(--pbg)";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--bl)";e.currentTarget.style.background="var(--s2)";}} onClick={()=>{setCi("搜视频 ");document.querySelector(".cin")?.focus();setMsgs(prev=>[...prev,{r:"bot",c:"好的，选择了「"+vt.name+"」模式！\n\n请在输入框输入你想搜的产品/行业关键词，比如：\n• 搜视频 面膜 "+vt.name.replace(/[^一-鿿]/g,"")+"\n• 搜视频 宠物用品 "+vt.name.replace(/[^一-鿿]/g,"")}]);}}><div style={{fontSize:13,fontWeight:700,color:"var(--t1)",marginBottom:3}}>{vt.name}</div><div style={{fontSize:11,color:"var(--t3)",lineHeight:1.5}}>{vt.desc}</div></div>)}</div></div>}
                 {m.videos&&<div style={{marginTop:12}}><div style={{fontSize:11,fontWeight:700,color:"var(--t3)",marginBottom:8}}>🎬 {m.viralLabel||"抖音视频"} · {m.videos.length}条 <span style={{fontWeight:400,fontSize:10}}>（点击可观看）</span></div>{m.videos.map((v,j)=><div key={j} style={{display:"flex",gap:10,padding:"10px 14px",background:"var(--s2)",borderRadius:10,marginBottom:6,border:"1px solid var(--bl)",cursor:"pointer",transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--pl)";e.currentTarget.style.background="var(--pbg)";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--bl)";e.currentTarget.style.background="var(--s2)";}} onClick={()=>{const url=v.video_url||("https://www.douyin.com/video/"+(v.video_id||""));window.open(url,"_blank");}}>{v.cover_url&&<div style={{width:60,height:80,borderRadius:6,overflow:"hidden",flexShrink:0,background:"#000",position:"relative"}}><img src={v.cover_url} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none"}}/><div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:20,height:20,borderRadius:10,background:"rgba(255,255,255,.8)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10}}>▶</div></div>}<div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:600,color:"var(--t1)",lineHeight:1.5,marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{(v.description||"").slice(0,80)}</div><div style={{display:"flex",gap:8,fontSize:10,color:"var(--t3)",flexWrap:"wrap",alignItems:"center"}}>{v.viral_tag&&<span style={{background:"linear-gradient(135deg,#FF6B6B,#EE5A24)",color:"#fff",padding:"2px 8px",borderRadius:10,fontWeight:700,fontSize:9}}>{v.viral_tag}</span>}<span>❤️ {(v.digg_count||0).toLocaleString()}</span><span>💬 {(v.comment_count||0).toLocaleString()}</span><span>▶️ {(v.play_count||0).toLocaleString()}</span>{v.duration?<span>⏱ {Math.round(v.duration/1000)}s</span>:null}</div></div></div>)}</div>}
                 {m.notes&&<div style={{marginTop:12}}><div style={{fontSize:11,fontWeight:700,color:"var(--t3)",marginBottom:8}}>📕 小红书笔记 · {m.notes.length}条 <span style={{fontWeight:400,fontSize:10}}>（点击查看原文）</span></div>{m.notes.map((n,j)=><div key={j} style={{padding:"10px 14px",background:"#FFF5F5",borderRadius:10,marginBottom:6,border:"1px solid #FED7D7",cursor:"pointer",transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#FC8181";e.currentTarget.style.background="#FEE2E2";e.currentTarget.style.transform="translateX(3px)";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="#FED7D7";e.currentTarget.style.background="#FFF5F5";e.currentTarget.style.transform="none";}} onClick={()=>{if(n.url)window.open(n.url,"_blank");else{const q=encodeURIComponent(n.title||n.author||"");window.open("https://www.xiaohongshu.com/search_result?keyword="+q,"_blank");}}}><div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}><div style={{fontSize:12,fontWeight:600,color:"var(--t1)",lineHeight:1.5,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n.title||""}</div>{n.url&&<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>}</div>{n.reason&&<div style={{fontSize:10,color:"#C05621",background:"#FEFCBF",padding:"2px 8px",borderRadius:10,fontWeight:600,marginBottom:4,display:"inline-block"}}>💡 {n.reason}</div>}{n.desc&&<div style={{fontSize:11,color:"var(--t2)",lineHeight:1.5,marginBottom:4}}>{n.desc}</div>}<div style={{display:"flex",gap:8,fontSize:10,color:"var(--t3)",flexWrap:"wrap",alignItems:"center"}}><span>❤️ {n.liked_count||0}</span><span>👤 {n.author||""}</span><span style={{background:"#FED7D7",color:"#E53E3E",padding:"1px 6px",borderRadius:4,fontWeight:600}}>{n.type==="video"?"视频":"图文"}</span></div></div>)}</div>}
@@ -5880,17 +6006,106 @@ div:hover>.sch-inline-del{opacity:1 !important}
                 </div></div></div>)}
               </div>
               <div className="cbr"><input className="cin" placeholder="聊聊你的创意想法..." value={ci} onChange={e=>setCi(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send(ci)}}/><button className="cmb"><I.Mic/></button><button className="csb" onClick={()=>send(ci)}><I.Send/></button></div>
-              {msgs.length>2&&<button className="cgb" onClick={async()=>{
+              {msgs.length>2&&<button className="cgb" onClick={()=>{
+                // 打开选择弹窗，默认全选所有段落
+                const allKeys=new Set();
+                msgs.forEach((m,i)=>{
+                  if(m.typing||!m.c||m.c.length<=5)return;
+                  splitSections(m.c).forEach((_,j)=>allKeys.add(`${i}-${j}`));
+                });
+                setDeepPickSel(allKeys);
+                setDeepPickExpand(new Set());
+                setDeepPickOpen(true);
+              }}><I.Zap/> 根据对话生成脚本</button>}
+
+              {/* 深度模式：选择对话记录弹窗（段落级） */}
+              {deepPickOpen&&<div className="ov" onClick={()=>setDeepPickOpen(false)} style={{zIndex:200}}><div className="mdl" onClick={e=>e.stopPropagation()} style={{maxWidth:680,maxHeight:"85vh",display:"flex",flexDirection:"column"}}>
+                <div className="mdl-h"><div className="mdl-ht">选择要纳入脚本生成的内容</div><button className="mdl-x" onClick={()=>setDeepPickOpen(false)}><I.X/></button></div>
+                <div style={{fontSize:12,color:"var(--t3)",padding:"0 24px 10px",lineHeight:1.5}}>展开消息可以分段选择，只勾选你认为有价值的内容</div>
+                <div style={{flex:1,overflow:"auto",padding:"0 24px 16px"}}>
+                  {msgs.map((m,i)=>{
+                    if(m.typing||!m.c||m.c.length<=5)return null;
+                    const secs=splitSections(m.c);
+                    const allKeys=secs.map((_,j)=>`${i}-${j}`);
+                    const checkedCount=allKeys.filter(k=>deepPickSel.has(k)).length;
+                    const allChecked=checkedCount===secs.length;
+                    const someChecked=checkedCount>0&&!allChecked;
+                    const expanded=deepPickExpand.has(i);
+                    const isUser=m.r==="user";
+                    return <div key={i} style={{marginBottom:8,borderRadius:12,border:allChecked?"2px solid var(--p)":someChecked?"2px solid var(--pl)":"1.5px solid var(--bl)",background:checkedCount>0?"var(--pbg)":"var(--s)",overflow:"hidden",transition:"all .15s"}}>
+                      {/* 消息头部：整条勾选 + 展开/收起 */}
+                      <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",cursor:"pointer"}} onClick={()=>{
+                        // 点头部：全选/全取消该消息所有段落
+                        setDeepPickSel(prev=>{const next=new Set(prev);if(allChecked){allKeys.forEach(k=>next.delete(k));}else{allKeys.forEach(k=>next.add(k));}return next;});
+                      }}>
+                        <div style={{width:20,height:20,borderRadius:5,border:`2px solid ${allChecked?"var(--p)":someChecked?"var(--pl)":"#ccc"}`,background:allChecked?"var(--p)":someChecked?"var(--pl)":"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          {allChecked&&<span style={{color:"#fff",fontSize:12,fontWeight:700}}>✓</span>}
+                          {someChecked&&!allChecked&&<span style={{color:"#fff",fontSize:10,fontWeight:700}}>—</span>}
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <span style={{fontSize:10,fontWeight:600,color:isUser?"var(--p)":"#059669"}}>{isUser?"你":"AI顾问"}</span>
+                          <span style={{fontSize:10,color:"var(--t3)",marginLeft:8}}>{checkedCount}/{secs.length} 段已选</span>
+                        </div>
+                        <div onClick={e=>{e.stopPropagation();setDeepPickExpand(prev=>{const n=new Set(prev);if(n.has(i))n.delete(i);else n.add(i);return n;});}} style={{fontSize:11,color:"var(--p)",cursor:"pointer",padding:"2px 8px",borderRadius:6,background:"var(--s)",flexShrink:0}}>
+                          {expanded?"收起":"展开 "+secs.length+"段"}
+                        </div>
+                      </div>
+                      {/* 收起时：预览第一段 */}
+                      {!expanded&&<div style={{padding:"0 14px 10px 44px",fontSize:12,color:"var(--t2)",lineHeight:1.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{secs[0]?.slice(0,80)||""}</div>}
+                      {/* 展开时：每段独立可选，卡片式UI */}
+                      {expanded&&<div style={{padding:"4px 10px 10px",display:"flex",flexDirection:"column",gap:8}}>
+                        {secs.map((sec,j)=>{
+                          const key=`${i}-${j}`;
+                          const secChecked=deepPickSel.has(key);
+                          // 提取标题（如果段落以序号/标题开头）
+                          const titleMatch=sec.match(/^(\d+[.、)）]\s*|[一二三四五六七八九十][、.]\s*|#{1,3}\s*|[【].*?[】]\s*|[▶📊🔍💡🎬🔥⭐]\s*)(.+)/);
+                          const title=titleMatch?titleMatch[1]+titleMatch[2].split("\n")[0]:"";
+                          const body=titleMatch?sec.slice(titleMatch[0].split("\n")[0].length).trim():sec;
+                          return <div key={j} onClick={e=>{e.stopPropagation();setDeepPickSel(prev=>{const n=new Set(prev);if(secChecked)n.delete(key);else n.add(key);return n;});}} style={{display:"flex",gap:10,padding:"12px 14px",borderRadius:12,border:secChecked?"2px solid var(--p)":"1.5px solid var(--bl)",background:secChecked?"linear-gradient(135deg,rgba(139,92,246,.04),rgba(139,92,246,.08))":"#fff",cursor:"pointer",transition:"all .15s",boxShadow:secChecked?"0 2px 8px rgba(139,92,246,.1)":"0 1px 3px rgba(0,0,0,.03)"}} onMouseEnter={e=>{if(!secChecked)e.currentTarget.style.borderColor="var(--pl)";}} onMouseLeave={e=>{if(!secChecked)e.currentTarget.style.borderColor="var(--bl)";}}>
+                            <div style={{width:20,height:20,borderRadius:6,border:`2px solid ${secChecked?"var(--p)":"#D1D5DB"}`,background:secChecked?"var(--p)":"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1,transition:"all .15s"}}>
+                              {secChecked&&<span style={{color:"#fff",fontSize:11,fontWeight:700}}>✓</span>}
+                            </div>
+                            <div style={{flex:1,minWidth:0}}>
+                              {title&&<div style={{fontSize:12,fontWeight:700,color:secChecked?"var(--p)":"var(--t1)",marginBottom:4,lineHeight:1.4}}>{title}</div>}
+                              {body&&<div style={{fontSize:11,color:"var(--t2)",lineHeight:1.7,whiteSpace:"pre-wrap",wordBreak:"break-word",maxHeight:120,overflow:"auto"}}>{body}</div>}
+                              {!title&&!body&&<div style={{fontSize:11,color:"var(--t2)",lineHeight:1.7,whiteSpace:"pre-wrap",wordBreak:"break-word",maxHeight:120,overflow:"auto"}}>{sec}</div>}
+                            </div>
+                          </div>;
+                        })}
+                      </div>}
+                    </div>;
+                  })}
+                </div>
+                <div style={{padding:"14px 24px",borderTop:"1px solid var(--bl)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{fontSize:12,color:"var(--t3)"}}>已选 <b style={{color:"var(--p)"}}>{deepPickSel.size}</b> 段内容</div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button style={{padding:"6px 14px",borderRadius:8,border:"1px solid var(--bl)",background:"var(--s)",color:"var(--t2)",fontSize:12,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>{
+                      // 全选/取消全选
+                      const allKeys=new Set();
+                      msgs.forEach((m,i)=>{if(m.typing||!m.c||m.c.length<=5)return;splitSections(m.c).forEach((_,j)=>allKeys.add(`${i}-${j}`));});
+                      setDeepPickSel(prev=>prev.size===allKeys.size?new Set():allKeys);
+                    }}>{(()=>{let total=0;msgs.forEach((m)=>{if(!m.typing&&m.c&&m.c.length>5)total+=splitSections(m.c).length;});return deepPickSel.size===total?"取消全选":"全选";})()}</button>
+                    <button disabled={deepPickSel.size===0} style={{padding:"6px 18px",borderRadius:8,border:"none",background:"var(--p)",color:"#fff",fontSize:12,fontWeight:600,cursor:deepPickSel.size===0?"not-allowed":"pointer",opacity:deepPickSel.size===0?.5:1,fontFamily:"inherit"}} onClick={async()=>{
+                setDeepPickOpen(false);
                 setPg("create");setCs("ai-generating");setAiScripts([]);activeCreatePg.current="create";
                 try{
-                  // ═══ 深度模式：总结对话 → 生成大纲 → 展开脚本（复用快速模式流程） ═══
+                  // ═══ 深度模式：基于选中段落 → 生成大纲 → 展开脚本 ═══
                   const ipCtx=getIpContext();
                   const riskRules="【平台违禁词规避】\n禁止极限词：最好用、第一、唯一、全网最、顶级、No.1、绝对、永久\n禁止医疗词：治疗、消炎、临床证明、药用\n禁止绝对承诺：保证有效、彻底解决\n必须替换：敏感肌→敏敏肌 | 美白→提亮肤色/亮肤 | 祛痘→改善痘肌 | 去黑头→清洁毛孔 | 减肥→塑形 | 抗老→改善细纹 | 无添加→配方简净 | 修复→改善调理 | 医美级→院线同款\nrisk字段：擦边表达设为true";
 
-                  // Step 1: 总结对话内容
-                  setAiGenStep("正在分析对话内容，提取创作需求...");
-                  const chatSummary=msgs.filter(m=>m.r==="user"||m.r==="bot").map(m=>(m.r==="user"?"用户":"顾问")+"："+(m.c||"").slice(0,300)).join("\n");
-                  const summaryResult=await callLLM({model:"gemini-3.1-pro-preview",system:"你是一位短视频创作分析师。从对话记录中提取关键创作信息。",prompt:`以下是用户和AI创作顾问的对话记录：\n\n${chatSummary}\n\n请从对话中提取并总结以下信息：\n1. 产品/品牌名称和品类\n2. 产品核心卖点和差异化优势\n3. 目标受众画像\n4. 用户偏好的风格/方向\n5. 对话中提到的爆款参考或竞品分析\n6. 其他有价值的创作线索\n\n直接输出总结文本，不需要JSON。`,temperature:0.3,maxTokens:2048});
+                  // Step 1: 收集选中的段落内容
+                  setAiGenStep("正在分析选中的内容，提取创作需求...");
+                  const selectedTexts=[];
+                  msgs.forEach((m,i)=>{
+                    if(m.typing||!m.c||m.c.length<=5)return;
+                    const secs=splitSections(m.c);
+                    const role=m.r==="user"?"用户":"顾问";
+                    secs.forEach((sec,j)=>{
+                      if(deepPickSel.has(`${i}-${j}`))selectedTexts.push(`${role}：${sec}`);
+                    });
+                  });
+                  const chatSummary=selectedTexts.join("\n\n");
+                  const summaryResult=await callLLM({model:"gemini-3.1-pro-preview",system:"你是一位短视频创作分析师。从对话记录中提取关键创作信息。",prompt:`以下是用户选中的对话记录（用户认为这些内容对脚本创作最有价值）：\n\n${chatSummary}\n\n请从这些对话中提取并总结以下信息：\n1. 产品/品牌名称和品类\n2. 产品核心卖点和差异化优势\n3. 目标受众画像\n4. 用户偏好的风格/方向\n5. 对话中提到的爆款参考或竞品分析\n6. 其他有价值的创作线索\n\n直接输出总结文本，不需要JSON。`,temperature:0.3,maxTokens:2048});
 
                   // Step 2: 生成大纲（复用快速模式逻辑）
                   setAiGenStep("正在设计脚本结构...");
@@ -5922,7 +6137,10 @@ div:hover>.sch-inline-del{opacity:1 !important}
                   setCurrentHistoryId(hid);
                   setCs("results");
                 }catch(e){console.error("[深度模式生成失败]",e);setAiScripts([]);setCs("results");setTimeout(()=>alert("AI脚本生成失败："+e.message+"\n\n当前显示的是内置示例脚本。"),300);}
-              }}><I.Zap/> 根据对话生成脚本</button>}
+              }}>确认生成脚本</button>
+                  </div>
+                </div>
+              </div></div>}
             </div>
           </div>
         </div>}

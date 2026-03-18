@@ -277,16 +277,37 @@ function videoComposePlugin() {
     const audioStreams = []
     let aidx = 1
 
-    // Concat all audio
+    // Mix audio with precise timing (matching subtitle timeline with xfade overlap)
     if (audioFiles.length > 0) {
-      const aConcatList = join(workDir, 'audio_concat.txt')
-      const aLines = audioFiles.map(f => `file '${f.replace(/\\/g, '/')}'`).join('\n')
-      await writeFile(aConcatList, aLines, 'utf-8')
-      const audioAll = join(workDir, 'audio_all.mp3')
-      await runFFmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', aConcatList, '-c', 'copy', audioAll])
-      finalArgs.push('-i', audioAll)
-      audioStreams.push(`[${aidx}:a]aresample=44100[narr]`)
-      aidx++
+      const td = 0.5  // must match xfade transition duration
+      for (const af of audioFiles) {
+        finalArgs.push('-i', af)
+      }
+
+      // Calculate start time for each audio clip (same as subtitle timeline)
+      const audioOffsets = []
+      let at = 0
+      for (let i = 0; i < clips.length; i++) {
+        audioOffsets.push(at)
+        at += (clips[i].duration || 5) - (i < clips.length - 1 ? td : 0)
+      }
+
+      // Build adelay + amix filter to align each audio to its correct position
+      const aFilters = []
+      const mixInputs = []
+      for (let i = 0; i < audioFiles.length; i++) {
+        const delayMs = Math.round(audioOffsets[i] * 1000)
+        const streamIdx = aidx + i
+        if (delayMs > 0) {
+          aFilters.push(`[${streamIdx}:a]aresample=44100,adelay=${delayMs}|${delayMs}[ad${i}]`)
+        } else {
+          aFilters.push(`[${streamIdx}:a]aresample=44100[ad${i}]`)
+        }
+        mixInputs.push(`[ad${i}]`)
+      }
+      aFilters.push(`${mixInputs.join('')}amix=inputs=${audioFiles.length}:duration=longest:normalize=0[narr]`)
+      audioStreams.push(...aFilters)
+      aidx += audioFiles.length
     }
 
     // Video filter: subtitles + color grading
@@ -437,21 +458,21 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/blt-proxy/, '')
       },
       '/schedule-api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8001',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/schedule-api/, '')
       },
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8001',
         changeOrigin: true,
         ws: true,
       },
       '/videos': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8001',
         changeOrigin: true,
       },
       '/comic-drama': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8001',
         changeOrigin: true,
       },
       '/suchuang-proxy': {

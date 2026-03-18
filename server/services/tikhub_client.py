@@ -454,29 +454,48 @@ class TikHubClient:
             return []
 
     def _parse_xhs_results(self, data: dict, max_count: int = 10) -> List[Dict]:
-        """解析小红书搜索结果"""
+        """解析小红书搜索结果，兼容多层嵌套"""
         notes = []
         try:
+            # TikHub 返回结构: data.data (可能还有 data.data.data)
             raw = data.get("data", {})
+            items = []
+
             if isinstance(raw, dict):
-                items = raw.get("items", raw.get("data", []))
+                # 尝试 data.data.data.items (三层嵌套)
+                inner = raw.get("data")
+                if isinstance(inner, dict):
+                    items = inner.get("items") or inner.get("notes") or []
+                # 尝试 data.data.items (两层)
+                if not items:
+                    items = raw.get("items") or raw.get("notes") or raw.get("data") or []
+                # items 可能是 dict (key=id)
                 if isinstance(items, dict):
-                    items = list(items.values()) if items else []
-            else:
-                items = raw if isinstance(raw, list) else []
+                    items = list(items.values())
+            elif isinstance(raw, list):
+                items = raw
 
             for item in items[:max_count]:
-                if not item:
+                if not item or not isinstance(item, dict):
                     continue
-                note_card = item.get("note_card", item) if isinstance(item, dict) else {}
-                interact_info = note_card.get("interact_info", {})
-                user = note_card.get("user", {})
+                # item 可能有 note 或 note_card 字段
+                note = item.get("note") or item.get("note_card") or item
+                interact_info = note.get("interact_info") or {}
+                user = note.get("user") or {}
+
+                title = (note.get("display_title")
+                         or note.get("title")
+                         or note.get("desc", "")[:30]
+                         or "")
+                if not title:
+                    continue
+
                 notes.append({
-                    "title": note_card.get("display_title", note_card.get("title", "")),
-                    "desc": note_card.get("desc", "")[:200],
-                    "liked_count": interact_info.get("liked_count", "0"),
-                    "author": user.get("nickname", ""),
-                    "type": note_card.get("type", "normal"),
+                    "title": title,
+                    "desc": (note.get("desc") or "")[:200],
+                    "liked_count": interact_info.get("liked_count") or note.get("liked_count") or "0",
+                    "author": user.get("nickname") or user.get("nick_name") or "",
+                    "type": note.get("type") or "normal",
                 })
         except Exception as e:
             logger.error(f"解析小红书结果失败: {e}")
