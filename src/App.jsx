@@ -5928,13 +5928,20 @@ div:hover>.sch-inline-del{opacity:1 !important}
           <div className="srt">
             <div className="cc">
               <div className="cmsg" ref={chatRef}>
-                {msgs.length<=1&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"60%",gap:12,opacity:.9}}>
-                  <div style={{width:56,height:56,borderRadius:16,background:"linear-gradient(135deg,var(--p),#A78BFA)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:24,boxShadow:"0 4px 20px rgba(124,58,237,.25)"}}><I.Bot/></div>
-                  <div style={{fontSize:18,fontWeight:800,color:"var(--t1)",letterSpacing:"-.3px"}}>AI 创作顾问</div>
-                  <div style={{fontSize:12,color:"var(--t3)",textAlign:"center",lineHeight:1.6,maxWidth:320}}>先告诉我你的产品/品牌和行业<br/>然后我帮你找热点、搜爆款、挖灵感</div>
-                  <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap",justifyContent:"center"}}>{[{t:"找抖音热点",ic:"🔥",bg:"#FEE2E2",bc:"#FECACA",c:"#DC2626"},{t:"搜索爆款视频",ic:"📈",bg:"#FEF3C7",bc:"#FDE68A",c:"#D97706"},{t:"搜小红书",ic:"📕",bg:"#FFE4E6",bc:"#FECDD3",c:"#E11D48"},{t:"帮我找灵感",ic:"💡",bg:"#F5F0FF",bc:"#DDD6FE",c:"#7C3AED"}].map((b,j)=><button key={j} style={{padding:"8px 14px",borderRadius:20,border:`1.5px solid ${b.bc}`,background:b.bg,color:b.c,fontSize:11,fontWeight:600,cursor:"pointer",transition:"all .2s",display:"flex",alignItems:"center",gap:4,fontFamily:"inherit"}} onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,.08)";}} onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}} onClick={()=>send(b.t)}>{b.ic} {b.t}</button>)}</div>
-                </div>}
-                {msgs.map((m,i)=>m.isWelcome?null:<div key={i} className={`mg ${m.r==="user"?"u":"bot"} fn`}><div className={`ma ${m.r==="user"?"usr":"bot"}`}>{m.r==="user"?"你":<I.Bot/>}</div><div style={{maxWidth:"85%",minWidth:0}}><div className={"mbu"+(m.typing?" typing-dots":"")}><div style={{whiteSpace:"pre-wrap"}}>{m.c}</div>
+                {msgs.map((m,i)=>{if(m.isWelcome)return <div key={i} className="mg bot fn"><div className="ma bot"><I.Bot/></div><div style={{maxWidth:"88%",minWidth:0}}>
+                  <div style={{padding:"16px 18px",borderRadius:14,background:"linear-gradient(160deg,#F8F6FF,#EFEBFF)",border:"1px solid #E4DDFB",borderTopLeftRadius:4,fontSize:13,lineHeight:1.7,boxShadow:"0 2px 10px rgba(124,58,237,.05)"}}>
+                    <div style={{color:"var(--t1)"}}>你好，我是你的 AI 内容顾问。</div>
+                    <div style={{color:"var(--t1)",marginBottom:14}}>告诉我你的产品或行业，我来帮你找热点、出创意、写脚本。</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>{[
+                      {t:"找热点",d:"发现可借势的流行趋势",cmd:"找抖音热点"},
+                      {t:"搜爆款",d:"看同行怎么拍的",cmd:"搜索爆款视频"},
+                      {t:"找灵感",d:"多平台挖掘创意角度",cmd:"帮我找灵感"},
+                    ].map((b,j)=><div key={j} style={{padding:"10px 12px",borderRadius:10,border:"1px solid var(--bl)",cursor:"pointer",transition:"all .2s",background:"#fff"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--pl)";e.currentTarget.style.background="var(--pbg)";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--bl)";e.currentTarget.style.background="#fff";}} onClick={()=>send(b.cmd)}>
+                      <div style={{fontSize:12,fontWeight:600,color:"var(--t1)",marginBottom:2}}>{b.t}</div>
+                      <div style={{fontSize:10,color:"var(--t3)",lineHeight:1.4}}>{b.d}</div>
+                    </div>)}</div>
+                  </div>
+                </div></div>;return <div key={i} className={`mg ${m.r==="user"?"u":"bot"} fn`}><div className={`ma ${m.r==="user"?"usr":"bot"}`}>{m.r==="user"?"你":<I.Bot/>}</div><div style={{maxWidth:"85%",minWidth:0}}><div className={"mbu"+(m.typing?" typing-dots":"")}><div style={{whiteSpace:"pre-wrap"}}>{m.c}</div>
                 {m.compAnalysis&&m.compVideo&&(()=>{const a=m.compAnalysis,v=m.compVideo;const lvlColor={"S":"#E53E3E","A":"#D97706","B":"#3B82F6","C":"#6B7280"}[a.viral_level]||"#7C3AED";const lvlBg={"S":"linear-gradient(135deg,#FEE2E2,#FECACA)","A":"linear-gradient(135deg,#FEF3C7,#FDE68A)","B":"linear-gradient(135deg,#DBEAFE,#BFDBFE)","C":"linear-gradient(135deg,#F4F4F5,#E4E4E7)"}[a.viral_level]||"linear-gradient(135deg,#F5F0FF,#EDE9FE)";const lvlGlow={"S":"0 0 20px rgba(229,62,62,.15)","A":"0 0 20px rgba(217,119,6,.12)","B":"0 0 20px rgba(59,130,246,.12)","C":"none"}[a.viral_level]||"none";return <div style={{marginTop:14}}>
 <div style={{borderRadius:18,overflow:"hidden",marginBottom:14,border:"1px solid var(--bl)",boxShadow:"0 2px 12px rgba(0,0,0,.06)",background:"#fff"}}>
 <div style={{display:"flex",gap:0,background:"linear-gradient(135deg,#18181B,#1E1E24)",position:"relative",cursor:v.url?"pointer":"default",transition:"all .2s"}} onMouseEnter={e=>{if(v.url)e.currentTarget.style.opacity=".92";}} onMouseLeave={e=>{e.currentTarget.style.opacity="1";}} onClick={()=>{if(v.url)window.open(v.url,"_blank");}}>
@@ -6003,7 +6010,7 @@ div:hover>.sch-inline-del{opacity:1 !important}
                     {p.style_tags&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{p.style_tags.map((tag,k)=><span key={k} style={{fontSize:10,padding:"3px 10px",borderRadius:12,background:"rgba(124,58,237,.1)",color:"var(--p)",fontWeight:600}}>#{tag}</span>)}</div>}
                   </div>;})()}
                 </div>}
-                </div></div></div>)}
+                </div></div></div>})}
               </div>
               <div className="cbr"><input className="cin" placeholder="聊聊你的创意想法..." value={ci} onChange={e=>setCi(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send(ci)}}/><button className="cmb"><I.Mic/></button><button className="csb" onClick={()=>send(ci)}><I.Send/></button></div>
               {msgs.length>2&&<button className="cgb" onClick={()=>{
